@@ -1,0 +1,20 @@
+services:
+  mongo:
+    image: mongo:7
+    container_name: qet3etak-mongo
+    restart: unless-stopped
+    ports:
+      - '27017:27017'
+    volumes:
+      - qet3etak_mongo_data:/data/db
+    environment:
+      MONGO_INITDB_DATABASE: qet3etak
+    healthcheck:
+      test: ['CMD', 'mongosh', '--eval', "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+volumes:
+  qet3etak_mongo_data:

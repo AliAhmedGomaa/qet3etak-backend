@@ -1,0 +1,31 @@
+# Expose as a web service. NestJS cannot run on Netlify static hosting.
+services:
+  - type: web
+    name: qet3etak-api
+    runtime: node
+    plan: free
+    region: frankfurt
+    buildCommand: npm ci && npm run build
+    startCommand: npm run start:prod
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: PORT
+        value: "3000"
+      - key: MONGODB_URI
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: JWT_EXPIRES_IN
+        value: 7d
+      - key: ADMIN_PHONE
+        value: "0500000000"
+      - key: ADMIN_PASSWORD
+        value: "Admin123!"
+      - key: VAPID_PUBLIC_KEY
+        sync: false
+      - key: VAPID_PRIVATE_KEY
+        sync: false
+      - key: VAPID_SUBJECT
+        value: mailto:admin@qet3etak.local

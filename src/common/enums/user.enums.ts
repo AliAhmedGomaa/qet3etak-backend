@@ -1,0 +1,10 @@
+export enum UserStatus {
+  PENDING_VERIFICATION = 'PENDING_VERIFICATION',
+  APPROVED = 'APPROVED',
+  REJECTED = 'REJECTED',
+}
+
+export enum UserRole {
+  SHOP_OWNER = 'SHOP_OWNER',
+  ADMIN = 'ADMIN',
+}

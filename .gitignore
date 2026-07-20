@@ -1,0 +1,26 @@
+# compiled output
+/dist
+/node_modules
+/build
+
+# logs
+logs
+*.log
+npm-debug.log*
+
+# env & local data
+.env
+.env.local
+uploads
+.data
+
+# IDE
+.idea
+.vscode
+*.swp
+
+# OS
+.DS_Store
+
+# coverage / test
+/coverage
