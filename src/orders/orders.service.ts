@@ -6,6 +6,11 @@ import {
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { OrderStatus, PaymentMethod } from '../common/enums/order.enums';
+import {
+  normalizePagination,
+  paginatedResult,
+  type PaginatedResult,
+} from '../common/pagination';
 import { ProductsService } from '../products/products.service';
 import { resolveUnitPrice } from '../products/pricing.util';
 import { UsersService } from '../users/users.service';
@@ -20,6 +25,18 @@ const STATUS_FLOW: OrderStatus[] = [
   OrderStatus.SHIPPED,
   OrderStatus.DELIVERED,
 ];
+
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/** Match orders by order number or shop name (case-insensitive, partial). */
+function buildOrderSearchFilter(q?: string): Record<string, unknown> {
+  const term = q?.trim();
+  if (!term) return {};
+  const rx = new RegExp(escapeRegex(term), 'i');
+  return { $or: [{ orderNumber: rx }, { shopName: rx }] };
+}
 
 @Injectable()
 export class OrdersService {
@@ -42,7 +59,9 @@ export class OrdersService {
 
     // Decrement stock
     for (const line of priced.lines) {
-      const product = await this.productsService.findById(String(line.productId));
+      const product = await this.productsService.findDocumentById(
+        String(line.productId),
+      );
       if (product.stockQuantity < line.quantity) {
         throw new BadRequestException(
           `Insufficient stock for ${product.title}`,
@@ -84,21 +103,56 @@ export class OrdersService {
     return order;
   }
 
-  async listForShop(shopId: string): Promise<OrderDocument[]> {
-    return this.orderModel
-      .find({ shopId })
-      .sort({ createdAt: -1 })
-      .exec();
+  async listForShop(
+    shopId: string,
+    page?: number,
+    limit?: number,
+  ): Promise<PaginatedResult<OrderDocument>> {
+    const p = normalizePagination(page, limit, 20);
+    const filter = { shopId: new Types.ObjectId(shopId) };
+    const [items, total] = await Promise.all([
+      this.orderModel
+        .find(filter)
+        .sort({ createdAt: -1 })
+        .skip(p.skip)
+        .limit(p.limit)
+        .exec(),
+      this.orderModel.countDocuments(filter).exec(),
+    ]);
+    return paginatedResult(items, total, p.page, p.limit);
   }
 
   async getForShop(shopId: string, orderId: string): Promise<OrderDocument> {
-    const order = await this.orderModel.findOne({ _id: orderId, shopId }).exec();
+    if (!Types.ObjectId.isValid(orderId)) {
+      throw new NotFoundException('Order not found');
+    }
+    const order = await this.orderModel
+      .findOne({
+        _id: new Types.ObjectId(orderId),
+        shopId: new Types.ObjectId(shopId),
+      })
+      .exec();
     if (!order) throw new NotFoundException('Order not found');
     return order;
   }
 
-  async listAll(): Promise<OrderDocument[]> {
-    return this.orderModel.find().sort({ createdAt: -1 }).exec();
+  async listAll(
+    page?: number,
+    limit?: number,
+    q?: string,
+  ): Promise<PaginatedResult<OrderDocument>> {
+    const p = normalizePagination(page, limit, 20);
+    const filter = buildOrderSearchFilter(q);
+    const [items, total] = await Promise.all([
+      this.orderModel
+        .find(filter)
+        .sort({ createdAt: -1 })
+        .skip(p.skip)
+        .limit(p.limit)
+        .exec(),
+      this.orderModel.countDocuments(filter).exec(),
+    ]);
+    return paginatedResult(items, total, p.page, p.limit);
   }
 
   async updateStatus(
@@ -147,7 +201,9 @@ export class OrdersService {
       if (!Types.ObjectId.isValid(item.productId)) {
         throw new BadRequestException(`Invalid product id ${item.productId}`);
       }
-      const product = await this.productsService.findById(item.productId);
+      const product = await this.productsService.findDocumentById(
+        item.productId,
+      );
       if (!product.isActive) {
         throw new BadRequestException(`${product.title} is not available`);
       }

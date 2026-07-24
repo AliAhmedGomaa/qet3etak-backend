@@ -13,7 +13,7 @@ export class OrderItem {
   @Prop({ required: true })
   title!: string;
 
-  @Prop({ required: true })
+  @Prop({ default: '' })
   sku!: string;
 
   @Prop({ type: String, enum: QualityGrade })

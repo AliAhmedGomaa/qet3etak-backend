@@ -1,4 +1,5 @@
-# Expose as a web service. NestJS cannot run on Netlify static hosting.
+# NestJS API on Render. MongoDB must be Atlas (or any reachable URI) —
+# local Docker Mongo is not reachable from Render.
 services:
   - type: web
     name: qet3etak-api
@@ -11,8 +12,15 @@ services:
     envVars:
       - key: NODE_VERSION
         value: "22"
+      - key: NODE_ENV
+        value: production
       - key: PORT
         value: "3000"
+      # Set in the Render dashboard after first deploy, e.g.
+      # https://qet3etak-api.onrender.com
+      - key: PUBLIC_BASE_URL
+        sync: false
+      # mongodb+srv://... from MongoDB Atlas
       - key: MONGODB_URI
         sync: false
       - key: JWT_SECRET
@@ -28,4 +36,4 @@ services:
       - key: VAPID_PRIVATE_KEY
         sync: false
       - key: VAPID_SUBJECT
-        value: mailto:admin@qet3etak.local
+        value: mailto:admin@qet3etak.com

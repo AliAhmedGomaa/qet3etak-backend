@@ -52,6 +52,7 @@ export class PushService implements OnModuleInit {
       endpoint: string;
       keys: { p256dh: string; auth: string };
     },
+    audience: 'SHOP_OWNER' | 'ADMIN' = 'SHOP_OWNER',
   ): Promise<PushSubscriptionDocument> {
     return this.subModel
       .findOneAndUpdate(
@@ -60,7 +61,7 @@ export class PushService implements OnModuleInit {
           userId: new Types.ObjectId(userId),
           endpoint: subscription.endpoint,
           keys: subscription.keys,
-          audience: 'SHOP_OWNER',
+          audience,
         },
         { upsert: true, new: true, setDefaultsOnInsert: true },
       )
@@ -86,6 +87,12 @@ export class PushService implements OnModuleInit {
   async broadcastToShopOwners(payload: PushPayload): Promise<number> {
     if (!this.enabled) return 0;
     const subs = await this.subModel.find({ audience: 'SHOP_OWNER' }).exec();
+    return this.sendToSubs(subs, payload);
+  }
+
+  async notifyAdmins(payload: PushPayload): Promise<number> {
+    if (!this.enabled) return 0;
+    const subs = await this.subModel.find({ audience: 'ADMIN' }).exec();
     return this.sendToSubs(subs, payload);
   }
 

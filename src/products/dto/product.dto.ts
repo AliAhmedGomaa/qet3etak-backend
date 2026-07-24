@@ -1,4 +1,4 @@
-import { Type } from 'class-transformer';
+import { Type, Transform, plainToInstance } from 'class-transformer';
 import {
   ArrayMinSize,
   IsArray,
@@ -12,6 +12,34 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { QualityGrade } from '../../common/enums/product.enums';
+
+function toOptionalBoolean(value: unknown): boolean | undefined {
+  if (value === undefined || value === null || value === '') return undefined;
+  if (typeof value === 'boolean') return value;
+  if (value === 'true' || value === '1') return true;
+  if (value === 'false' || value === '0') return false;
+  return undefined;
+}
+
+function parseTieredPricing(value: unknown): TieredPriceDto[] | undefined {
+  if (value == null || value === '') return undefined;
+  let parsed: unknown = value;
+  if (typeof value === 'string') {
+    try {
+      parsed = JSON.parse(value);
+    } catch {
+      return undefined;
+    }
+  }
+  if (!Array.isArray(parsed)) return undefined;
+  return plainToInstance(
+    TieredPriceDto,
+    parsed.map((t: { minQty?: unknown; price?: unknown }) => ({
+      minQty: Number(t?.minQty),
+      price: Number(t?.price),
+    })),
+  );
+}
 
 export class TieredPriceDto {
   @Type(() => Number)
@@ -42,6 +70,11 @@ export class CreateProductDto {
   @MinLength(1)
   category!: string;
 
+  @IsOptional()
+  @IsString()
+  @MinLength(1)
+  part?: string;
+
   @IsEnum(QualityGrade)
   qualityGrade!: QualityGrade;
 
@@ -56,6 +89,7 @@ export class CreateProductDto {
   basePrice!: number;
 
   @IsOptional()
+  @Transform(({ value }) => parseTieredPricing(value))
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => TieredPriceDto)
@@ -63,13 +97,10 @@ export class CreateProductDto {
 
   @IsOptional()
   @IsString()
-  imageUrl?: string;
-
-  @IsOptional()
-  @IsString()
   sku?: string;
 
   @IsOptional()
+  @Transform(({ value }) => toOptionalBoolean(value))
   @IsBoolean()
   isActive?: boolean;
 }
@@ -93,6 +124,10 @@ export class UpdateProductDto {
   category?: string;
 
   @IsOptional()
+  @IsString()
+  part?: string;
+
+  @IsOptional()
   @IsEnum(QualityGrade)
   qualityGrade?: QualityGrade;
 
@@ -109,6 +144,7 @@ export class UpdateProductDto {
   basePrice?: number;
 
   @IsOptional()
+  @Transform(({ value }) => parseTieredPricing(value))
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => TieredPriceDto)
@@ -116,13 +152,10 @@ export class UpdateProductDto {
 
   @IsOptional()
   @IsString()
-  imageUrl?: string;
-
-  @IsOptional()
-  @IsString()
   sku?: string;
 
   @IsOptional()
+  @Transform(({ value }) => toOptionalBoolean(value))
   @IsBoolean()
   isActive?: boolean;
 }
@@ -144,6 +177,11 @@ export class CatalogQueryDto {
   @IsOptional()
   @IsString()
   category?: string;
+
+  /** Comma-separated part names (generic — accepts exact names or synonyms) */
+  @IsOptional()
+  @IsString()
+  part?: string;
 
   @IsOptional()
   @IsString()

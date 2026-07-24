@@ -11,7 +11,7 @@
     "start": "nest start",
     "start:dev": "nest start --watch",
     "start:debug": "nest start --debug --watch",
-    "start:prod": "node dist/main",
+    "start:prod": "node dist/src/main.js",
     "mongo:up": "docker compose up -d mongo",
     "mongo:down": "docker compose down",
     "mongo:logs": "docker compose logs -f mongo",
@@ -20,7 +20,9 @@
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
-    "test:e2e": "jest --config ./test/jest-e2e.json"
+    "test:e2e": "jest --config ./test/jest-e2e.json",
+    "seed": "ts-node scripts/seed.ts",
+    "seed:reset": "SEED_RESET=true ts-node scripts/seed.ts"
   },
   "dependencies": {
     "@nestjs/common": "^11.0.1",
@@ -30,7 +32,9 @@
     "@nestjs/mongoose": "^11.0.4",
     "@nestjs/passport": "^11.0.5",
     "@nestjs/platform-express": "^11.1.28",
+    "@nestjs/platform-socket.io": "^11.1.28",
     "@nestjs/serve-static": "^5.0.5",
+    "@nestjs/websockets": "^11.1.28",
     "bcrypt": "^6.0.0",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.15.1",
@@ -40,6 +44,7 @@
     "passport-jwt": "^4.0.1",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
+    "socket.io": "^4.8.3",
     "web-push": "^3.6.7"
   },
   "devDependencies": {

@@ -5,9 +5,11 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import { UserRole } from '../common/enums/user.enums';
+import { PaginationQueryDto } from '../common/pagination';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { RequireApproved } from '../auth/decorators/require-approved.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -23,24 +25,30 @@ export class WalletsController {
   constructor(private readonly walletsService: WalletsService) {}
 
   @Get('wholesale/wallet')
-  @Roles(UserRole.SHOP_OWNER)
+  @Roles(UserRole.SHOP_OWNER, UserRole.ADMIN)
   @RequireApproved()
-  async myWallet(@CurrentUser() user: AuthUser) {
+  async myWallet(
+    @CurrentUser() user: AuthUser,
+    @Query() query: PaginationQueryDto,
+  ) {
     const wallet = await this.walletsService.getByShopId(user.userId);
-    return this.walletsService.toView(wallet);
+    return this.walletsService.toView(wallet, query.page, query.limit);
   }
 
   @Get('admin/wallets')
   @Roles(UserRole.ADMIN)
-  listWallets() {
-    return this.walletsService.listShopWallets();
+  listWallets(@Query() query: PaginationQueryDto) {
+    return this.walletsService.listShopWallets(query.page, query.limit);
   }
 
   @Get('admin/wallets/:shopId')
   @Roles(UserRole.ADMIN)
-  async getWallet(@Param('shopId') shopId: string) {
+  async getWallet(
+    @Param('shopId') shopId: string,
+    @Query() query: PaginationQueryDto,
+  ) {
     const wallet = await this.walletsService.getByShopId(shopId);
-    return this.walletsService.toView(wallet);
+    return this.walletsService.toView(wallet, query.page, query.limit);
   }
 
   @Patch('admin/wallets/:shopId/credit-limit')

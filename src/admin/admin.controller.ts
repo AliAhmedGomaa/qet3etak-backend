@@ -9,6 +9,8 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { UserRole, UserStatus } from '../common/enums/user.enums';
+import { absoluteMediaUrl } from '../common/media-url';
+import { PaginatedStatusQueryDto } from '../common/pagination';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -26,17 +28,25 @@ export class AdminController {
   ) {}
 
   @Get()
-  listShops(@Query('status') status?: string) {
+  async listShops(@Query() query: PaginatedStatusQueryDto) {
     let parsed: UserStatus | undefined;
-    if (status) {
-      if (!Object.values(UserStatus).includes(status as UserStatus)) {
+    if (query.status) {
+      if (!Object.values(UserStatus).includes(query.status as UserStatus)) {
         throw new BadRequestException(
           `status must be one of: ${Object.values(UserStatus).join(', ')}`,
         );
       }
-      parsed = status as UserStatus;
+      parsed = query.status as UserStatus;
     }
-    return this.usersService.findShops(parsed);
+    const result = await this.usersService.findShops(
+      parsed,
+      query.page,
+      query.limit,
+    );
+    return {
+      ...result,
+      items: result.items.map((shop) => this.toShopView(shop)),
+    };
   }
 
   @Patch(':id/status')
@@ -58,6 +68,18 @@ export class AdminController {
     if (dto.status === UserStatus.APPROVED) {
       await this.walletsService.ensureForShop(id);
     }
-    return user;
+    return this.toShopView(user);
+  }
+
+  private toShopView(shop: { toJSON: () => unknown }) {
+    const json = shop.toJSON() as Record<string, unknown>;
+    return {
+      ...json,
+      commercialRegPhotoUrl: absoluteMediaUrl(
+        typeof json.commercialRegPhotoUrl === 'string'
+          ? json.commercialRegPhotoUrl
+          : '',
+      ),
+    };
   }
 }

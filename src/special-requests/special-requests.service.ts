@@ -6,6 +6,12 @@ import {
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { SpecialRequestStatus } from '../common/enums/special-request.enums';
+import { absoluteMediaUrl } from '../common/media-url';
+import {
+  normalizePagination,
+  paginatedResult,
+  type PaginatedResult,
+} from '../common/pagination';
 import { PushService } from '../push/push.service';
 import { UsersService } from '../users/users.service';
 import {
@@ -30,7 +36,7 @@ export class SpecialRequestsService {
     shopUserId: string,
     dto: CreateSpecialRequestDto,
     photoFilename?: string,
-  ): Promise<SpecialRequestDocument> {
+  ): Promise<Record<string, unknown>> {
     const shop = await this.usersService.findByIdOrFail(shopUserId);
     const photoUrl =
       photoFilename != null
@@ -40,7 +46,7 @@ export class SpecialRequestsService {
       throw new BadRequestException('Photo of the rare part is required');
     }
 
-    return this.requestModel.create({
+    const created = await this.requestModel.create({
       shopId: new Types.ObjectId(shopUserId),
       shopName: shop.shopName,
       deviceModel: dto.deviceModel.trim(),
@@ -51,25 +57,72 @@ export class SpecialRequestsService {
       status: SpecialRequestStatus.PENDING,
       adminReply: '',
     });
+    return this.toRequestView(created);
   }
 
-  listForShop(shopId: string): Promise<SpecialRequestDocument[]> {
-    return this.requestModel
-      .find({ shopId })
-      .sort({ createdAt: -1 })
-      .exec();
+  async listForShop(
+    shopId: string,
+    page?: number,
+    limit?: number,
+  ): Promise<PaginatedResult<Record<string, unknown>>> {
+    const p = normalizePagination(page, limit, 20);
+    const filter = { shopId: new Types.ObjectId(shopId) };
+    const [items, total] = await Promise.all([
+      this.requestModel
+        .find(filter)
+        .sort({ createdAt: -1 })
+        .skip(p.skip)
+        .limit(p.limit)
+        .exec(),
+      this.requestModel.countDocuments(filter).exec(),
+    ]);
+    return paginatedResult(
+      items.map((item) => this.toRequestView(item)),
+      total,
+      p.page,
+      p.limit,
+    );
   }
 
-  listAll(status?: SpecialRequestStatus): Promise<SpecialRequestDocument[]> {
+  async listAll(
+    status?: SpecialRequestStatus,
+    page?: number,
+    limit?: number,
+    q?: string,
+  ): Promise<PaginatedResult<Record<string, unknown>>> {
+    const p = normalizePagination(page, limit, 20);
     const filter: Record<string, unknown> = {};
     if (status) filter['status'] = status;
-    return this.requestModel.find(filter).sort({ createdAt: -1 }).exec();
+    const term = q?.trim();
+    if (term) {
+      const rx = new RegExp(escapeRegex(term), 'i');
+      filter['$or'] = [
+        { shopName: rx },
+        { deviceModel: rx },
+        { partName: rx },
+      ];
+    }
+    const [items, total] = await Promise.all([
+      this.requestModel
+        .find(filter)
+        .sort({ createdAt: -1 })
+        .skip(p.skip)
+        .limit(p.limit)
+        .exec(),
+      this.requestModel.countDocuments(filter).exec(),
+    ]);
+    return paginatedResult(
+      items.map((item) => this.toRequestView(item)),
+      total,
+      p.page,
+      p.limit,
+    );
   }
 
   async quote(
     id: string,
     dto: QuoteSpecialRequestDto,
-  ): Promise<SpecialRequestDocument> {
+  ): Promise<Record<string, unknown>> {
     const req = await this.requestModel.findById(id).exec();
     if (!req) throw new NotFoundException('Special request not found');
 
@@ -96,20 +149,34 @@ export class SpecialRequestsService {
       tag: `special-${req.id}`,
     });
 
-    return req;
+    return this.toRequestView(req);
   }
 
-  async fulfill(id: string): Promise<SpecialRequestDocument> {
+  async fulfill(id: string): Promise<Record<string, unknown>> {
     const req = await this.requestModel.findById(id).exec();
     if (!req) throw new NotFoundException('Special request not found');
     req.status = SpecialRequestStatus.FULFILLED;
     await req.save();
     await this.pushService.notifyUser(String(req.shopId), {
       title: 'تم توفير القطعة النادرة',
-      body: `${req.partName} لـ ${req.deviceModel} أصبحت للتأكيد`,
+      body: `${req.partName} لـ ${req.deviceModel} جاهزة للتأكيد`,
       url: `/special-requests`,
       tag: `special-done-${req.id}`,
     });
-    return req;
+    return this.toRequestView(req);
   }
+
+  private toRequestView(req: SpecialRequestDocument): Record<string, unknown> {
+    const json = req.toJSON() as unknown as Record<string, unknown>;
+    return {
+      ...json,
+      photoUrl: absoluteMediaUrl(
+        typeof json.photoUrl === 'string' ? json.photoUrl : '',
+      ),
+    };
+  }
+}
+
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }

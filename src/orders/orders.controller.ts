@@ -5,9 +5,11 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import { UserRole } from '../common/enums/user.enums';
+import { PaginationQueryDto } from '../common/pagination';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { RequireApproved } from '../auth/decorators/require-approved.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -32,8 +34,8 @@ export class OrdersController {
   @Get('wholesale/orders')
   @Roles(UserRole.SHOP_OWNER)
   @RequireApproved()
-  myOrders(@CurrentUser() user: AuthUser) {
-    return this.ordersService.listForShop(user.userId);
+  myOrders(@CurrentUser() user: AuthUser, @Query() query: PaginationQueryDto) {
+    return this.ordersService.listForShop(user.userId, query.page, query.limit);
   }
 
   @Get('wholesale/orders/:id')
@@ -45,8 +47,8 @@ export class OrdersController {
 
   @Get('admin/orders')
   @Roles(UserRole.ADMIN)
-  listOrders() {
-    return this.ordersService.listAll();
+  listOrders(@Query() query: PaginationQueryDto) {
+    return this.ordersService.listAll(query.page, query.limit, query.q);
   }
 
   @Patch('admin/orders/:id/status')

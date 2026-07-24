@@ -2,6 +2,11 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { UserStatus } from '../common/enums/user.enums';
+import {
+  normalizePagination,
+  paginatedResult,
+  type PaginatedResult,
+} from '../common/pagination';
 import { User, UserDocument } from './schemas/user.schema';
 
 export type CreateUserInput = {
@@ -42,10 +47,24 @@ export class UsersService {
     return user;
   }
 
-  findShops(status?: UserStatus): Promise<UserDocument[]> {
+  async findShops(
+    status?: UserStatus,
+    page?: number,
+    limit?: number,
+  ): Promise<PaginatedResult<UserDocument>> {
+    const p = normalizePagination(page, limit, 20);
     const filter: Record<string, unknown> = { role: 'SHOP_OWNER' };
     if (status) filter['status'] = status;
-    return this.userModel.find(filter).sort({ createdAt: -1 }).exec();
+    const [items, total] = await Promise.all([
+      this.userModel
+        .find(filter)
+        .sort({ createdAt: -1 })
+        .skip(p.skip)
+        .limit(p.limit)
+        .exec(),
+      this.userModel.countDocuments(filter).exec(),
+    ]);
+    return paginatedResult(items, total, p.page, p.limit);
   }
 
   async updateStatus(

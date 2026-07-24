@@ -7,6 +7,11 @@ import {
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { WalletTxType } from '../common/enums/order.enums';
+import {
+  normalizePagination,
+  paginatedResult,
+  type PaginatedResult,
+} from '../common/pagination';
 import { Wallet, WalletDocument } from './schemas/wallet.schema';
 
 const DEFAULT_CREDIT_LIMIT = 5000;
@@ -155,35 +160,73 @@ export class WalletsService {
     return wallet.save();
   }
 
-  async listShopWallets(): Promise<
-    Array<Record<string, unknown> & { availableCredit: number; utilization: number }>
+  async listShopWallets(
+    page?: number,
+    limit?: number,
+  ): Promise<
+    PaginatedResult<
+      Record<string, unknown> & { availableCredit: number; utilization: number }
+    >
   > {
-    const wallets = await this.walletModel
-      .find()
-      .populate('shopId', 'shopName fullName phone status city')
-      .sort({ updatedAt: -1 })
-      .exec();
+    const p = normalizePagination(page, limit, 20);
+    const [wallets, total] = await Promise.all([
+      this.walletModel
+        .find()
+        .populate('shopId', 'shopName fullName phone status city')
+        .sort({ updatedAt: -1 })
+        .skip(p.skip)
+        .limit(p.limit)
+        .select('-transactions')
+        .exec(),
+      this.walletModel.countDocuments().exec(),
+    ]);
 
-    return wallets.map((w) => {
+    const items = wallets.map((w) => {
       const json = w.toJSON() as unknown as Record<string, unknown>;
-      const limit = w.creditLimit || 0;
+      const creditLimit = w.creditLimit || 0;
       const debt = w.currentDebt || 0;
       return {
         ...json,
-        availableCredit: Number(Math.max(0, limit - debt).toFixed(2)),
-        utilization: limit > 0 ? Number(((debt / limit) * 100).toFixed(1)) : 0,
+        transactions: [],
+        availableCredit: Number(Math.max(0, creditLimit - debt).toFixed(2)),
+        utilization:
+          creditLimit > 0
+            ? Number(((debt / creditLimit) * 100).toFixed(1))
+            : 0,
       };
     });
+
+    return paginatedResult(items, total, p.page, p.limit);
   }
 
-  toView(wallet: WalletDocument) {
+  toView(
+    wallet: WalletDocument,
+    page?: number,
+    limit?: number,
+  ) {
+    const p = normalizePagination(page, limit, 20);
     const json = wallet.toJSON() as unknown as Record<string, unknown>;
-    const limit = wallet.creditLimit || 0;
+    const creditLimit = wallet.creditLimit || 0;
     const debt = wallet.currentDebt || 0;
+    const allTx = Array.isArray(wallet.transactions)
+      ? wallet.transactions
+      : [];
+    const total = allTx.length;
+    const sliced = allTx.slice(p.skip, p.skip + p.limit);
+    const txPage = paginatedResult(sliced, total, p.page, p.limit);
+
     return {
       ...json,
-      availableCredit: Number(Math.max(0, limit - debt).toFixed(2)),
-      utilization: limit > 0 ? Number(((debt / limit) * 100).toFixed(1)) : 0,
+      transactions: txPage.items,
+      transactionsMeta: {
+        page: txPage.page,
+        limit: txPage.limit,
+        total: txPage.total,
+        totalPages: txPage.totalPages,
+      },
+      availableCredit: Number(Math.max(0, creditLimit - debt).toFixed(2)),
+      utilization:
+        creditLimit > 0 ? Number(((debt / creditLimit) * 100).toFixed(1)) : 0,
     };
   }
 }

@@ -7,6 +7,7 @@ import {
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import { UserRole, UserStatus } from '../common/enums/user.enums';
+import { absoluteMediaUrl } from '../common/media-url';
 import { UserDocument } from '../users/schemas/user.schema';
 import { UsersService } from '../users/users.service';
 import { LoginDto } from './dto/login.dto';
@@ -73,7 +74,7 @@ export class AuthService {
 
   async me(userId: string): Promise<Record<string, unknown>> {
     const user = await this.usersService.findByIdOrFail(userId);
-    return user.toJSON() as unknown as Record<string, unknown>;
+    return this.toUserView(user);
   }
 
   private tokenResponse(user: UserDocument): {
@@ -84,7 +85,19 @@ export class AuthService {
     const accessToken = this.jwtService.sign(payload);
     return {
       accessToken,
-      user: user.toJSON() as unknown as Record<string, unknown>,
+      user: this.toUserView(user),
+    };
+  }
+
+  private toUserView(user: UserDocument): Record<string, unknown> {
+    const json = user.toJSON() as unknown as Record<string, unknown>;
+    return {
+      ...json,
+      commercialRegPhotoUrl: absoluteMediaUrl(
+        typeof json.commercialRegPhotoUrl === 'string'
+          ? json.commercialRegPhotoUrl
+          : '',
+      ),
     };
   }
 }

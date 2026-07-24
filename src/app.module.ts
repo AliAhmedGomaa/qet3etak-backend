@@ -10,11 +10,16 @@ import { UserRole, UserStatus } from './common/enums/user.enums';
 import { HealthController } from './health.controller';
 import { UsersModule } from './users/users.module';
 import { UsersService } from './users/users.service';
+import { BrandsModule } from './brands/brands.module';
+import { CategoriesModule } from './categories/categories.module';
 import { ProductsModule } from './products/products.module';
 import { WalletsModule } from './wallets/wallets.module';
 import { OrdersModule } from './orders/orders.module';
 import { PushModule } from './push/push.module';
 import { SpecialRequestsModule } from './special-requests/special-requests.module';
+import { PurchasingModule } from './purchasing/purchasing.module';
+import { FinancialsModule } from './financials/financials.module';
+import { ChatModule } from './chat/chat.module';
 
 @Module({
   imports: [
@@ -35,11 +40,16 @@ import { SpecialRequestsModule } from './special-requests/special-requests.modul
     UsersModule,
     AuthModule,
     AdminModule,
+    BrandsModule,
+    CategoriesModule,
     ProductsModule,
     WalletsModule,
     OrdersModule,
     PushModule,
     SpecialRequestsModule,
+    PurchasingModule,
+    FinancialsModule,
+    ChatModule,
   ],
   controllers: [HealthController],
 })

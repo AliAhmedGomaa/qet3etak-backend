@@ -7,6 +7,12 @@ import {
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, PipelineStage, Types } from 'mongoose';
 import { QualityGrade } from '../common/enums/product.enums';
+import { absoluteMediaUrl } from '../common/media-url';
+import {
+  normalizePagination,
+  paginatedResult,
+  type PaginatedResult,
+} from '../common/pagination';
 import {
   CalculateCartDto,
   CatalogQueryDto,
@@ -15,6 +21,12 @@ import {
 } from './dto/product.dto';
 import { buildDiscountMatrix, resolveUnitPrice } from './pricing.util';
 import { Product, ProductDocument } from './schemas/product.schema';
+import {
+  buildPartFilter,
+  buildRelevanceScoreExpr,
+  buildSmartSearchFilter,
+  inferPartFromTitle,
+} from './search.util';
 
 type ProductFilter = Record<string, unknown>;
 
@@ -34,25 +46,75 @@ export class ProductsService implements OnModuleInit {
 
   async onModuleInit(): Promise<void> {
     const count = await this.productModel.countDocuments();
-    if (count > 0) return;
-    await this.productModel.insertMany(SEED_PRODUCTS);
+    if (count === 0) {
+      await this.productModel.insertMany(SEED_PRODUCTS);
+    }
+    // Backfill missing part names from title/model for older documents
+    const missing = await this.productModel
+      .find({
+        $or: [{ part: { $exists: false } }, { part: null }, { part: '' }],
+      })
+      .select('title model part')
+      .exec();
+    for (const doc of missing) {
+      doc.part = inferPartFromTitle(doc.title, doc.get('model'));
+      await doc.save();
+    }
   }
 
-  create(dto: CreateProductDto): Promise<ProductDocument> {
-    return this.productModel.create({
-      ...dto,
+  async create(
+    dto: CreateProductDto,
+    imageFilename: string,
+  ): Promise<Record<string, unknown>> {
+    const part =
+      dto.part?.trim() || inferPartFromTitle(dto.title, dto.model) || dto.title;
+    const product = await this.productModel.create({
+      title: dto.title.trim(),
+      brand: dto.brand.trim(),
+      model: dto.model.trim(),
+      category: dto.category.trim(),
+      part,
+      qualityGrade: dto.qualityGrade,
+      stockQuantity: dto.stockQuantity,
+      basePrice: dto.basePrice,
       tieredPricing: this.normalizeTiers(dto.tieredPricing ?? []),
-      imageUrl: dto.imageUrl ?? '',
-      sku: dto.sku ?? '',
+      imageUrl: `/uploads/${imageFilename}`,
+      sku: dto.sku?.trim() ?? '',
       isActive: dto.isActive ?? true,
     });
+    return this.toProductView(product);
   }
 
-  async findAllAdmin(): Promise<ProductDocument[]> {
-    return this.productModel.find().sort({ updatedAt: -1 }).exec();
+  async findAllAdmin(
+    page?: number,
+    limit?: number,
+    q?: string,
+  ): Promise<PaginatedResult<Record<string, unknown>>> {
+    const p = normalizePagination(page, limit, 20);
+    const filter = buildSmartSearchFilter(q?.trim() ?? '') ?? {};
+    const [items, total] = await Promise.all([
+      this.productModel
+        .find(filter)
+        .sort({ updatedAt: -1 })
+        .skip(p.skip)
+        .limit(p.limit)
+        .exec(),
+      this.productModel.countDocuments(filter).exec(),
+    ]);
+    return paginatedResult(
+      items.map((item) => this.toProductView(item)),
+      total,
+      p.page,
+      p.limit,
+    );
   }
 
-  async findById(id: string): Promise<ProductDocument> {
+  async findById(id: string): Promise<Record<string, unknown>> {
+    const product = await this.findDocumentById(id);
+    return this.toProductView(product);
+  }
+
+  async findDocumentById(id: string): Promise<ProductDocument> {
     if (!Types.ObjectId.isValid(id)) {
       throw new NotFoundException('Product not found');
     }
@@ -61,23 +123,79 @@ export class ProductsService implements OnModuleInit {
     return product;
   }
 
-  async update(id: string, dto: UpdateProductDto): Promise<ProductDocument> {
-    const product = await this.findById(id);
+  async update(
+    id: string,
+    dto: UpdateProductDto,
+    imageFilename?: string,
+  ): Promise<Record<string, unknown>> {
+    const product = await this.findDocumentById(id);
     if (dto.title != null) product.title = dto.title;
     if (dto.brand != null) product.brand = dto.brand;
     // `model` conflicts with Mongoose Document.model()
     if (dto.model != null) product.set('model', dto.model);
     if (dto.category != null) product.category = dto.category;
+    if (dto.part != null) product.part = dto.part.trim();
     if (dto.qualityGrade != null) product.qualityGrade = dto.qualityGrade;
     if (dto.stockQuantity != null) product.stockQuantity = dto.stockQuantity;
     if (dto.basePrice != null) product.basePrice = dto.basePrice;
-    if (dto.imageUrl != null) product.imageUrl = dto.imageUrl;
+    if (imageFilename != null) {
+      product.imageUrl = `/uploads/${imageFilename}`;
+    }
     if (dto.sku != null) product.sku = dto.sku;
     if (dto.isActive != null) product.isActive = dto.isActive;
     if (dto.tieredPricing != null) {
       product.tieredPricing = this.normalizeTiers(dto.tieredPricing);
     }
-    return product.save();
+    // Keep part in sync when title/model change and part was not explicitly set
+    if (dto.part == null && (dto.title != null || dto.model != null)) {
+      if (!product.part?.trim()) {
+        product.part = inferPartFromTitle(product.title, product.get('model'));
+      }
+    }
+    await product.save();
+    return this.toProductView(product);
+  }
+
+  /**
+   * Receive purchased stock into inventory and recalculate the product's
+   * weighted-average landed cost:
+   *   newCost = ((oldStock * oldCost) + (newQty * newLandedCost)) / (oldStock + newQty)
+   */
+  async applyReceivedStock(
+    productId: string,
+    newQty: number,
+    newLandedCost: number,
+  ): Promise<ProductDocument> {
+    const product = await this.findDocumentById(productId);
+    const oldStock = product.stockQuantity;
+    const oldCost = product.costPrice ?? 0;
+    const totalQty = oldStock + newQty;
+
+    const newCost =
+      totalQty > 0
+        ? (oldStock * oldCost + newQty * newLandedCost) / totalQty
+        : newLandedCost;
+
+    product.stockQuantity = totalQty;
+    product.costPrice = Number(newCost.toFixed(4));
+    await product.save();
+    return product;
+  }
+
+  /** Remove damaged/lost units from stock (never below zero). */
+  async decrementStock(
+    productId: string,
+    quantity: number,
+  ): Promise<ProductDocument> {
+    const product = await this.findDocumentById(productId);
+    if (quantity > product.stockQuantity) {
+      throw new BadRequestException(
+        `Cannot remove ${quantity} units of ${product.title}; only ${product.stockQuantity} in stock`,
+      );
+    }
+    product.stockQuantity -= quantity;
+    await product.save();
+    return product;
   }
 
   async remove(id: string): Promise<{ deleted: boolean }> {
@@ -87,82 +205,47 @@ export class ProductsService implements OnModuleInit {
   }
 
   /**
-   * Aggregation: match filters + optional text search, facet for total + page.
+   * Aggregation: facet filters + smart free-text search (partial, synonyms, multi-token).
    */
   async searchCatalog(query: CatalogQueryDto) {
     const page = query.page ?? 1;
     const limit = Math.min(query.limit ?? 24, 100);
     const skip = (page - 1) * limit;
 
-    const match: ProductFilter = { isActive: true };
-    const brands = splitCsv(query.brand);
-    const models = splitCsv(query.model);
-    const categories = splitCsv(query.category);
-    const grades = splitCsv(query.qualityGrade);
+    const match = this.buildCatalogMatch(query);
+    const searchQ = query.q?.trim() ?? '';
+    const pipeline: PipelineStage[] = [{ $match: match }];
 
-    if (brands.length) match['brand'] = { $in: brands };
-    if (models.length) match['model'] = { $in: models };
-    if (categories.length) match['category'] = { $in: categories };
-    if (grades.length) match['qualityGrade'] = { $in: grades };
+    const projectFields = {
+      title: 1,
+      brand: 1,
+      model: 1,
+      category: 1,
+      part: 1,
+      qualityGrade: 1,
+      stockQuantity: 1,
+      basePrice: 1,
+      tieredPricing: 1,
+      imageUrl: 1,
+      sku: 1,
+      createdAt: 1,
+      updatedAt: 1,
+      score: 1,
+    };
 
-    const pipeline: PipelineStage[] = [];
-
-    if (query.q?.trim()) {
-      pipeline.push({
-        $match: {
-          ...match,
-          $text: { $search: query.q.trim() },
-        },
-      });
-      pipeline.push({
-        $addFields: { score: { $meta: 'textScore' } },
-      });
-    } else {
-      pipeline.push({ $match: match });
-    }
-
-    const itemsStages: PipelineStage.Facet['$facet'][string] = query.q?.trim()
+    const itemsStages: PipelineStage.Facet['$facet'][string] = searchQ
       ? [
-          { $sort: { score: { $meta: 'textScore' }, title: 1 } } as never,
+          { $addFields: { score: buildRelevanceScoreExpr(searchQ) } },
+          { $sort: { score: -1, brand: 1, title: 1 } },
           { $skip: skip },
           { $limit: limit },
-          {
-            $project: {
-              title: 1,
-              brand: 1,
-              model: 1,
-              category: 1,
-              qualityGrade: 1,
-              stockQuantity: 1,
-              basePrice: 1,
-              tieredPricing: 1,
-              imageUrl: 1,
-              sku: 1,
-              createdAt: 1,
-              updatedAt: 1,
-            },
-          },
+          { $project: projectFields },
         ]
       : [
           { $sort: { brand: 1, title: 1 } },
           { $skip: skip },
           { $limit: limit },
-          {
-            $project: {
-              title: 1,
-              brand: 1,
-              model: 1,
-              category: 1,
-              qualityGrade: 1,
-              stockQuantity: 1,
-              basePrice: 1,
-              tieredPricing: 1,
-              imageUrl: 1,
-              sku: 1,
-              createdAt: 1,
-              updatedAt: 1,
-            },
-          },
+          { $project: projectFields },
         ];
 
     pipeline.push({
@@ -179,6 +262,9 @@ export class ProductsService implements OnModuleInit {
         ...doc,
         id: String(doc._id),
         _id: undefined,
+        imageUrl: absoluteMediaUrl(
+          typeof doc.imageUrl === 'string' ? doc.imageUrl : '',
+        ),
         discountMatrix: buildDiscountMatrix(
           doc.basePrice,
           doc.tieredPricing ?? [],
@@ -195,51 +281,95 @@ export class ProductsService implements OnModuleInit {
       limit,
       total,
       totalPages: Math.max(1, Math.ceil(total / limit)),
+      query: searchQ || undefined,
+    };
+  }
+
+  /** Single active product for the wholesale catalog detail page. */
+  async getCatalogProduct(id: string): Promise<Record<string, unknown>> {
+    const product = await this.findDocumentById(id);
+    if (!product.isActive) {
+      throw new NotFoundException('Product not found');
+    }
+    return {
+      ...this.toProductView(product),
+      discountMatrix: buildDiscountMatrix(
+        product.basePrice,
+        product.tieredPricing ?? [],
+      ),
+      stockLabel: this.stockLabel(product.stockQuantity),
     };
   }
 
   /** Facet values for multi-select filter pills (respects current filters except own dimension). */
   async getFacets(query: CatalogQueryDto) {
-    const base: ProductFilter = { isActive: true };
+    const brands = splitCsv(query.brand);
+    const models = splitCsv(query.model);
+    const categories = splitCsv(query.category);
+    const parts = splitCsv(query.part);
+    const grades = splitCsv(query.qualityGrade);
 
+    type FacetDim = 'brand' | 'model' | 'category' | 'part' | 'qualityGrade';
+
+    const withCommon = (exclude?: FacetDim) => {
+      const match: ProductFilter = { isActive: true };
+      const b = exclude === 'brand' ? [] : brands;
+      const m = exclude === 'model' ? [] : models;
+      const c = exclude === 'category' ? [] : categories;
+      const p = exclude === 'part' ? [] : parts;
+      const g = exclude === 'qualityGrade' ? [] : grades;
+      if (b.length) match['brand'] = { $in: b };
+      if (m.length) match['model'] = { $in: m };
+      if (c.length) match['category'] = { $in: c };
+      if (g.length) match['qualityGrade'] = { $in: g };
+
+      const clauses: ProductFilter[] = [match];
+      const search = buildSmartSearchFilter(query.q?.trim() ?? '');
+      if (search) clauses.push(search);
+      const partFilter = buildPartFilter(p);
+      if (partFilter) clauses.push(partFilter);
+
+      return clauses.length === 1 ? clauses[0]! : { $and: clauses };
+    };
+
+    const distinct = async (field: string, exclude?: FacetDim) => {
+      const values = await this.productModel.distinct(field, withCommon(exclude));
+      return (values as string[])
+        .filter((v) => typeof v === 'string' && v.trim().length > 0)
+        .sort((a, b) => a.localeCompare(b));
+    };
+
+    const [brand, model, category, part, qualityGrade] = await Promise.all([
+      distinct('brand', 'brand'),
+      distinct('model', 'model'),
+      distinct('category', 'category'),
+      distinct('part', 'part'),
+      distinct('qualityGrade', 'qualityGrade'),
+    ]);
+
+    return { brand, model, category, part, qualityGrade };
+  }
+
+  /** Shared catalog match: active + facet filters + smart free-text search. */
+  private buildCatalogMatch(query: CatalogQueryDto): ProductFilter {
+    const match: ProductFilter = { isActive: true };
     const brands = splitCsv(query.brand);
     const models = splitCsv(query.model);
     const categories = splitCsv(query.category);
     const grades = splitCsv(query.qualityGrade);
 
-    const withCommon = (extra: ProductFilter = {}) => {
-      const m: ProductFilter = { ...base, ...extra };
-      if (query.q?.trim()) {
-        Object.assign(m, { $text: { $search: query.q.trim() } });
-      }
-      return m;
-    };
+    if (brands.length) match['brand'] = { $in: brands };
+    if (models.length) match['model'] = { $in: models };
+    if (categories.length) match['category'] = { $in: categories };
+    if (grades.length) match['qualityGrade'] = { $in: grades };
 
-    const distinct = async (
-      field: string,
-      exclude?: 'brand' | 'model' | 'category' | 'qualityGrade',
-    ) => {
-      const filter = withCommon();
-      if (exclude !== 'brand' && brands.length) filter['brand'] = { $in: brands };
-      if (exclude !== 'model' && models.length) filter['model'] = { $in: models };
-      if (exclude !== 'category' && categories.length) {
-        filter['category'] = { $in: categories };
-      }
-      if (exclude !== 'qualityGrade' && grades.length) {
-        filter['qualityGrade'] = { $in: grades };
-      }
-      const values = await this.productModel.distinct(field, filter);
-      return (values as string[]).filter(Boolean).sort((a, b) => a.localeCompare(b));
-    };
+    const clauses: ProductFilter[] = [match];
+    const search = buildSmartSearchFilter(query.q?.trim() ?? '');
+    if (search) clauses.push(search);
+    const partFilter = buildPartFilter(splitCsv(query.part));
+    if (partFilter) clauses.push(partFilter);
 
-    const [brand, model, category, qualityGrade] = await Promise.all([
-      distinct('brand', 'brand'),
-      distinct('model', 'model'),
-      distinct('category', 'category'),
-      distinct('qualityGrade', 'qualityGrade'),
-    ]);
-
-    return { brand, model, category, qualityGrade };
+    return clauses.length === 1 ? clauses[0]! : { $and: clauses };
   }
 
   async calculateCart(dto: CalculateCartDto) {
@@ -291,7 +421,7 @@ export class ProductsService implements OnModuleInit {
 
   /** Instant single-line price quote for card +/- controls */
   async quoteLine(productId: string, quantity: number) {
-    const product = await this.findById(productId);
+    const product = await this.findDocumentById(productId);
     const qty = Math.max(1, Math.floor(quantity));
     const pricing = resolveUnitPrice(
       qty,
@@ -307,6 +437,16 @@ export class ProductsService implements OnModuleInit {
       discountMatrix: buildDiscountMatrix(
         product.basePrice,
         product.tieredPricing ?? [],
+      ),
+    };
+  }
+
+  private toProductView(product: ProductDocument): Record<string, unknown> {
+    const json = product.toJSON() as unknown as Record<string, unknown>;
+    return {
+      ...json,
+      imageUrl: absoluteMediaUrl(
+        typeof json.imageUrl === 'string' ? json.imageUrl : '',
       ),
     };
   }
@@ -340,6 +480,7 @@ const SEED_PRODUCTS = [
     brand: 'Apple',
     model: 'iPhone 14',
     category: 'Screens',
+    part: 'LCD Assembly',
     qualityGrade: QualityGrade.Original,
     stockQuantity: 42,
     basePrice: 85,
@@ -347,8 +488,7 @@ const SEED_PRODUCTS = [
       { minQty: 5, price: 78 },
       { minQty: 20, price: 72 },
     ],
-    imageUrl:
-      'https://images.unsplash.com/photo-1592899677977-9c10ca588bbd?w=800&q=80',
+    imageUrl: '/uploads/product-placeholder.png',
     sku: 'SCR-IP14-ORG',
     isActive: true,
   },
@@ -357,6 +497,7 @@ const SEED_PRODUCTS = [
     brand: 'Apple',
     model: 'iPhone 14',
     category: 'Screens',
+    part: 'LCD Assembly',
     qualityGrade: QualityGrade.HighCopy,
     stockQuantity: 3,
     basePrice: 45,
@@ -364,8 +505,7 @@ const SEED_PRODUCTS = [
       { minQty: 5, price: 40 },
       { minQty: 10, price: 36 },
     ],
-    imageUrl:
-      'https://images.unsplash.com/photo-1511707171634-5f897ff02aa9?w=800&q=80',
+    imageUrl: '/uploads/product-placeholder.png',
     sku: 'SCR-IP14-HC',
     isActive: true,
   },
@@ -374,6 +514,7 @@ const SEED_PRODUCTS = [
     brand: 'Samsung',
     model: 'Galaxy S23',
     category: 'Batteries',
+    part: 'Battery Pack',
     qualityGrade: QualityGrade.Original,
     stockQuantity: 120,
     basePrice: 28,
@@ -381,8 +522,7 @@ const SEED_PRODUCTS = [
       { minQty: 10, price: 24 },
       { minQty: 50, price: 21 },
     ],
-    imageUrl:
-      'https://images.unsplash.com/photo-1601784551446-20c9e07cdbdb?w=800&q=80',
+    imageUrl: '/uploads/product-placeholder.png',
     sku: 'BAT-S23-ORG',
     isActive: true,
   },
@@ -391,12 +531,12 @@ const SEED_PRODUCTS = [
     brand: 'Xiaomi',
     model: 'Redmi Note 12',
     category: 'Charging Ports',
+    part: 'Charging Port Flex',
     qualityGrade: QualityGrade.Copy,
     stockQuantity: 8,
     basePrice: 6.5,
     tieredPricing: [{ minQty: 20, price: 5.2 }],
-    imageUrl:
-      'https://images.unsplash.com/photo-1580910051074-3eb694886505?w=800&q=80',
+    imageUrl: '/uploads/product-placeholder.png',
     sku: 'CHG-RN12-CPY',
     isActive: true,
   },
@@ -405,12 +545,12 @@ const SEED_PRODUCTS = [
     brand: 'Huawei',
     model: 'P30',
     category: 'Back Covers',
+    part: 'Rear Glass Panel',
     qualityGrade: QualityGrade.Used,
     stockQuantity: 0,
     basePrice: 12,
     tieredPricing: [],
-    imageUrl:
-      'https://images.unsplash.com/photo-1510557880182-3d4d3cba35a5?w=800&q=80',
+    imageUrl: '/uploads/product-placeholder.png',
     sku: 'BCK-P30-USED',
     isActive: true,
   },
@@ -419,6 +559,7 @@ const SEED_PRODUCTS = [
     brand: 'Apple',
     model: 'iPhone 13',
     category: 'Cameras',
+    part: 'Back Camera Lens',
     qualityGrade: QualityGrade.HighCopy,
     stockQuantity: 55,
     basePrice: 9,
@@ -426,8 +567,7 @@ const SEED_PRODUCTS = [
       { minQty: 5, price: 8 },
       { minQty: 25, price: 6.5 },
     ],
-    imageUrl:
-      'https://images.unsplash.com/photo-1516035069371-29a1b244cc32?w=800&q=80',
+    imageUrl: '/uploads/product-placeholder.png',
     sku: 'CAM-IP13-HC',
     isActive: true,
   },

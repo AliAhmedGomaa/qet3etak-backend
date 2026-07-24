@@ -17,6 +17,10 @@ import { extname, join } from 'path';
 import { existsSync, mkdirSync } from 'fs';
 import { SpecialRequestStatus } from '../common/enums/special-request.enums';
 import { UserRole } from '../common/enums/user.enums';
+import {
+  PaginatedStatusQueryDto,
+  PaginationQueryDto,
+} from '../common/pagination';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { RequireApproved } from '../auth/decorators/require-approved.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -71,17 +75,34 @@ export class SpecialRequestsController {
   @Get('wholesale/special-requests')
   @Roles(UserRole.SHOP_OWNER)
   @RequireApproved()
-  myRequests(@CurrentUser() user: AuthUser) {
-    return this.requestsService.listForShop(user.userId);
+  myRequests(
+    @CurrentUser() user: AuthUser,
+    @Query() query: PaginationQueryDto,
+  ) {
+    return this.requestsService.listForShop(
+      user.userId,
+      query.page,
+      query.limit,
+    );
   }
 
   @Get('admin/special-requests')
   @Roles(UserRole.ADMIN)
-  list(@Query('status') status?: string) {
-    if (status && !Object.values(SpecialRequestStatus).includes(status as SpecialRequestStatus)) {
+  list(@Query() query: PaginatedStatusQueryDto) {
+    if (
+      query.status &&
+      !Object.values(SpecialRequestStatus).includes(
+        query.status as SpecialRequestStatus,
+      )
+    ) {
       throw new BadRequestException('Invalid status filter');
     }
-    return this.requestsService.listAll(status as SpecialRequestStatus | undefined);
+    return this.requestsService.listAll(
+      query.status as SpecialRequestStatus | undefined,
+      query.page,
+      query.limit,
+      query.q,
+    );
   }
 
   @Patch('admin/special-requests/:id/quote')

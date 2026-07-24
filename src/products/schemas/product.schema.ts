@@ -29,6 +29,10 @@ export class Product {
   @Prop({ required: true, trim: true, index: true })
   category!: string;
 
+  /** Specific part name (e.g. LCD Assembly, Battery Pack) — independent of category */
+  @Prop({ required: true, trim: true, index: true, default: '' })
+  part!: string;
+
   @Prop({
     type: String,
     enum: QualityGrade,
@@ -42,6 +46,13 @@ export class Product {
 
   @Prop({ required: true, min: 0 })
   basePrice!: number;
+
+  /**
+   * Weighted-average landed cost per unit, recalculated whenever a
+   * PurchaseOrder is received. Used for COGS / profit reporting.
+   */
+  @Prop({ required: true, min: 0, default: 0 })
+  costPrice!: number;
 
   @Prop({ type: [TieredPriceSchema], default: [] })
   tieredPricing!: TieredPrice[];
@@ -63,10 +74,11 @@ ProductSchema.index({
   brand: 'text',
   model: 'text',
   category: 'text',
+  part: 'text',
   sku: 'text',
 });
 
-ProductSchema.index({ brand: 1, model: 1, category: 1, qualityGrade: 1 });
+ProductSchema.index({ brand: 1, model: 1, category: 1, part: 1, qualityGrade: 1 });
 
 ProductSchema.set('toJSON', {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

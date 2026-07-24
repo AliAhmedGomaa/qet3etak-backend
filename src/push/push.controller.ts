@@ -34,13 +34,31 @@ export class PushController {
     @CurrentUser() user: AuthUser,
     @Body() dto: SavePushSubscriptionDto,
   ) {
-    return this.pushService.saveSubscription(user.userId, dto);
+    return this.pushService.saveSubscription(user.userId, dto, 'SHOP_OWNER');
   }
 
   @Delete('wholesale/push/subscribe')
   @Roles(UserRole.SHOP_OWNER)
   @RequireApproved()
   unsubscribe(
+    @CurrentUser() user: AuthUser,
+    @Body() body: { endpoint?: string },
+  ) {
+    return this.pushService.removeSubscription(user.userId, body.endpoint);
+  }
+
+  @Post('admin/push/subscribe')
+  @Roles(UserRole.ADMIN)
+  subscribeAdmin(
+    @CurrentUser() user: AuthUser,
+    @Body() dto: SavePushSubscriptionDto,
+  ) {
+    return this.pushService.saveSubscription(user.userId, dto, 'ADMIN');
+  }
+
+  @Delete('admin/push/subscribe')
+  @Roles(UserRole.ADMIN)
+  unsubscribeAdmin(
     @CurrentUser() user: AuthUser,
     @Body() body: { endpoint?: string },
   ) {
