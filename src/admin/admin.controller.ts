@@ -82,7 +82,10 @@ export class AdminController {
 
   @Post()
   @ApiOperation({ summary: 'Create a shop (owner account) as admin' })
-  async createShop(@Body() dto: CreateAdminShopDto) {
+  async createShop(
+    @CurrentUser() actor: AuthUser,
+    @Body() dto: CreateAdminShopDto,
+  ) {
     const phone = dto.phone.trim();
     const existing = await this.usersService.findByPhone(phone);
     if (existing) {
@@ -96,6 +99,12 @@ export class AdminController {
     ) {
       throw new BadRequestException('Rejection reason is required');
     }
+
+    const forcedBranch = effectiveBranchScope(actor);
+    const branchId =
+      forcedBranch !== null
+        ? forcedBranch || undefined
+        : dto.branchId?.trim() || undefined;
 
     const passwordHash = await bcrypt.hash(dto.password, 10);
     const user = await this.usersService.create({
@@ -112,7 +121,7 @@ export class AdminController {
         status === UserStatus.REJECTED
           ? dto.rejectionReason?.trim()
           : undefined,
-      branchId: dto.branchId?.trim() || undefined,
+      branchId,
     });
 
     if (status === UserStatus.APPROVED) {
