@@ -16,5 +16,13 @@
         { "key": "Vary", "value": "Origin" }
       ]
     }
-  ]
+  ],
+  "functions": {
+    "api/**": {
+      "includeFiles": "dist/assets/uploads/**"
+    },
+    "src/main.ts": {
+      "includeFiles": "dist/assets/uploads/**"
+    }
+  }
 }

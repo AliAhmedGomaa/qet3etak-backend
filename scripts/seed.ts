@@ -281,10 +281,11 @@ async function main(): Promise<void> {
   const db = mongoose.connection.db;
   if (!db) throw new Error('MongoDB connection failed');
 
-  // Ensure local placeholder assets exist for seeded images
+  // Ensure local placeholder assets exist for seeded images (from tracked src/assets/uploads)
   const uploadsDir = join(process.cwd(), 'uploads');
   if (!existsSync(uploadsDir)) mkdirSync(uploadsDir, { recursive: true });
 
+  const bundledDir = join(process.cwd(), 'src', 'assets', 'uploads');
   const requiredAssets = [
     'product-placeholder.png',
     'shop-placeholder.png',
@@ -301,19 +302,24 @@ async function main(): Promise<void> {
     'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO5WlL8AAAAASUVORK5CYII=',
     'base64',
   );
-  const preferredProduct = join(uploadsDir, 'product-placeholder.png');
-  const preferredShop = join(uploadsDir, 'shop-placeholder.png');
+  const preferredProduct = join(bundledDir, 'product-placeholder.png');
+  const preferredShop = join(bundledDir, 'shop-placeholder.png');
   for (const name of requiredAssets) {
     const assetPath = join(uploadsDir, name);
-    // Recreate if missing or still the old 1×1 stub (~68 bytes)
+    const bundledPath = join(bundledDir, name);
+    // Prefer tracked bundled asset; recreate if missing or still the old 1×1 stub (~68 bytes)
     if (!existsSync(assetPath) || statSync(assetPath).size < 200) {
+      if (existsSync(bundledPath) && statSync(bundledPath).size >= 200) {
+        writeFileSync(assetPath, readFileSync(bundledPath));
+        continue;
+      }
       const source =
         name === 'shop-placeholder.png' || name === 'admin-placeholder.png'
           ? existsSync(preferredShop) && statSync(preferredShop).size >= 200
             ? preferredShop
             : preferredProduct
           : preferredProduct;
-      if (existsSync(source) && statSync(source).size >= 200 && source !== assetPath) {
+      if (existsSync(source) && statSync(source).size >= 200) {
         writeFileSync(assetPath, readFileSync(source));
       } else if (!existsSync(assetPath)) {
         writeFileSync(assetPath, tinyPng);

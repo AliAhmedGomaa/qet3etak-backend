@@ -12,6 +12,7 @@ ENV NODE_ENV=production
 COPY package*.json ./
 RUN npm ci --omit=dev
 COPY --from=build /app/dist ./dist
-COPY --from=build /app/uploads ./uploads
+# Placeholders live in dist/assets/uploads (nest-cli assets); seed into ./uploads on boot.
+COPY --from=build /app/src/assets/uploads ./uploads
 EXPOSE 3000
 CMD ["node", "dist/src/main.js"]
