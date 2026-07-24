@@ -13,6 +13,7 @@ import {
   paginatedResult,
   type PaginatedResult,
 } from '../common/pagination';
+import { QualitiesService } from '../qualities/qualities.service';
 import {
   CalculateCartDto,
   CatalogQueryDto,
@@ -42,12 +43,25 @@ function splitCsv(value?: string): string[] {
 export class ProductsService implements OnModuleInit {
   constructor(
     @InjectModel(Product.name) private readonly productModel: Model<Product>,
+    private readonly qualitiesService: QualitiesService,
   ) {}
 
   async onModuleInit(): Promise<void> {
     const count = await this.productModel.countDocuments();
     if (count === 0) {
-      await this.productModel.insertMany(SEED_PRODUCTS);
+      const seeded: Array<Record<string, unknown>> = [];
+      for (const item of SEED_PRODUCTS) {
+        const resolved = await this.qualitiesService.resolveForProduct({
+          qualityGrade: item.qualityGrade,
+          requireActive: false,
+        });
+        seeded.push({
+          ...item,
+          qualityId: resolved.qualityId,
+          qualityGrade: resolved.qualityGrade,
+        });
+      }
+      await this.productModel.insertMany(seeded);
     }
     // Backfill missing part names from title/model for older documents
     const missing = await this.productModel
@@ -68,13 +82,19 @@ export class ProductsService implements OnModuleInit {
   ): Promise<Record<string, unknown>> {
     const part =
       dto.part?.trim() || inferPartFromTitle(dto.title, dto.model) || dto.title;
+    const resolved = await this.qualitiesService.resolveForProduct({
+      qualityId: dto.qualityId,
+      qualityGrade: dto.qualityGrade,
+      requireActive: true,
+    });
     const product = await this.productModel.create({
       title: dto.title.trim(),
       brand: dto.brand.trim(),
       model: dto.model.trim(),
       category: dto.category.trim(),
       part,
-      qualityGrade: dto.qualityGrade,
+      qualityId: resolved.qualityId,
+      qualityGrade: resolved.qualityGrade,
       stockQuantity: dto.stockQuantity,
       basePrice: dto.basePrice,
       tieredPricing: this.normalizeTiers(dto.tieredPricing ?? []),
@@ -135,7 +155,15 @@ export class ProductsService implements OnModuleInit {
     if (dto.model != null) product.set('model', dto.model);
     if (dto.category != null) product.category = dto.category;
     if (dto.part != null) product.part = dto.part.trim();
-    if (dto.qualityGrade != null) product.qualityGrade = dto.qualityGrade;
+    if (dto.qualityId != null || dto.qualityGrade != null) {
+      const resolved = await this.qualitiesService.resolveForProduct({
+        qualityId: dto.qualityId,
+        qualityGrade: dto.qualityGrade,
+        requireActive: true,
+      });
+      product.qualityId = resolved.qualityId;
+      product.qualityGrade = resolved.qualityGrade;
+    }
     if (dto.stockQuantity != null) product.stockQuantity = dto.stockQuantity;
     if (dto.basePrice != null) product.basePrice = dto.basePrice;
     if (imageFilename != null) {
@@ -237,6 +265,7 @@ export class ProductsService implements OnModuleInit {
       category: 1,
       part: 1,
       qualityGrade: 1,
+      qualityId: 1,
       stockQuantity: 1,
       basePrice: 1,
       tieredPricing: 1,

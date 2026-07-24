@@ -5,6 +5,7 @@ import ExcelJS from 'exceljs';
 import { Brand } from '../brands/schemas/brand.schema';
 import { Category } from '../categories/schemas/category.schema';
 import { Product, ProductDocument } from '../products/schemas/product.schema';
+import { QualitiesService } from '../qualities/qualities.service';
 import { inferPartFromTitle } from '../products/search.util';
 import { parseImportFile } from './import-parser';
 import { IMPORT_FIELD_DOCS, IMPORT_SAMPLE_JSON } from './import.template';
@@ -45,7 +46,7 @@ function productMatchKey(p: {
     nameKey(p.model),
     nameKey(p.category),
     nameKey(p.part),
-    p.qualityGrade,
+    nameKey(p.qualityGrade),
   ].join('|');
 }
 
@@ -79,6 +80,7 @@ export class ImportService {
     @InjectModel(Category.name)
     private readonly categoryModel: Model<Category>,
     @InjectModel(Product.name) private readonly productModel: Model<Product>,
+    private readonly qualitiesService: QualitiesService,
   ) {}
 
   getTemplateDocs() {
@@ -468,7 +470,10 @@ export class ImportService {
         model: new RegExp(`^${escapeRegex(row.model.trim())}$`, 'i'),
         category: new RegExp(`^${escapeRegex(row.category.trim())}$`, 'i'),
         part: new RegExp(`^${escapeRegex(part)}$`, 'i'),
-        qualityGrade: row.qualityGrade,
+        qualityGrade: new RegExp(
+          `^${escapeRegex(row.qualityGrade.trim())}$`,
+          'i',
+        ),
       })
       .exec();
   }
@@ -495,6 +500,10 @@ export class ImportService {
 
     try {
       const existing = await this.findProduct({ ...row, brand, category, part });
+      const resolved = await this.qualitiesService.resolveForProduct({
+        qualityGrade: row.qualityGrade,
+        requireActive: false,
+      });
 
       if (existing) {
         if (!dryRun) {
@@ -503,7 +512,8 @@ export class ImportService {
           existing.set('model', row.model.trim());
           existing.category = category;
           existing.part = part;
-          existing.qualityGrade = row.qualityGrade;
+          existing.qualityId = resolved.qualityId;
+          existing.qualityGrade = resolved.qualityGrade;
           existing.stockQuantity = row.stockQuantity;
           existing.basePrice = row.basePrice;
           if (row.sku != null) existing.sku = row.sku.trim();
@@ -536,7 +546,8 @@ export class ImportService {
           model: row.model.trim(),
           category,
           part,
-          qualityGrade: row.qualityGrade,
+          qualityId: resolved.qualityId,
+          qualityGrade: resolved.qualityGrade,
           stockQuantity: row.stockQuantity,
           basePrice: row.basePrice,
           costPrice: 0,

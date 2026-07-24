@@ -1,6 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { HydratedDocument } from 'mongoose';
-import { QualityGrade } from '../../common/enums/product.enums';
+import { HydratedDocument, Types } from 'mongoose';
 
 export type ProductDocument = HydratedDocument<Product>;
 
@@ -33,13 +32,18 @@ export class Product {
   @Prop({ required: true, trim: true, index: true, default: '' })
   part!: string;
 
+  /** Optional FK to admin-managed Quality; denormalized name kept in qualityGrade. */
+  @Prop({ type: Types.ObjectId, ref: 'Quality', index: true })
+  qualityId?: Types.ObjectId;
+
+  /** Denormalized quality name (synced from Quality.name when qualityId is set). */
   @Prop({
     type: String,
-    enum: QualityGrade,
     required: true,
+    trim: true,
     index: true,
   })
-  qualityGrade!: QualityGrade;
+  qualityGrade!: string;
 
   @Prop({ required: true, min: 0, default: 0 })
   stockQuantity!: number;

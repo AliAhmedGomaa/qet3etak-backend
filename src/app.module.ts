@@ -12,6 +12,7 @@ import { UsersModule } from './users/users.module';
 import { UsersService } from './users/users.service';
 import { BrandsModule } from './brands/brands.module';
 import { CategoriesModule } from './categories/categories.module';
+import { QualitiesModule } from './qualities/qualities.module';
 import { ProductsModule } from './products/products.module';
 import { WalletsModule } from './wallets/wallets.module';
 import { OrdersModule } from './orders/orders.module';
@@ -49,6 +50,7 @@ import { RolesService } from './roles/roles.service';
     BranchesModule,
     BrandsModule,
     CategoriesModule,
+    QualitiesModule,
     ProductsModule,
     WalletsModule,
     OrdersModule,

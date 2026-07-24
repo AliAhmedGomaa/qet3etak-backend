@@ -1,7 +1,6 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument, Types } from 'mongoose';
 import { OrderStatus, PaymentMethod } from '../../common/enums/order.enums';
-import { QualityGrade } from '../../common/enums/product.enums';
 
 export type OrderDocument = HydratedDocument<Order>;
 
@@ -16,8 +15,9 @@ export class OrderItem {
   @Prop({ default: '' })
   sku!: string;
 
-  @Prop({ type: String, enum: QualityGrade })
-  qualityGrade?: QualityGrade;
+  /** Snapshot of product quality name at order time. */
+  @Prop({ type: String, trim: true })
+  qualityGrade?: string;
 
   @Prop({ required: true, min: 1 })
   quantity!: number;

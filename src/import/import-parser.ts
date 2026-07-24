@@ -1,6 +1,6 @@
 import { BadRequestException } from '@nestjs/common';
 import ExcelJS from 'exceljs';
-import { QualityGrade } from '../common/enums/product.enums';
+import { canonicalizeQualityName } from '../qualities/qualities.service';
 import { inferPartFromTitle } from '../products/search.util';
 import type {
   ImportBrandRow,
@@ -9,7 +9,6 @@ import type {
   NormalizedImportPayload,
 } from './import.types';
 
-const QUALITY_VALUES = new Set(Object.values(QualityGrade));
 const MAX_BYTES = 10 * 1024 * 1024;
 
 export interface ParseOutcome {
@@ -78,23 +77,10 @@ function parseTieredPricing(
   return tiers.length ? tiers : undefined;
 }
 
-function normalizeQualityGrade(value: unknown): QualityGrade | null {
+function normalizeQualityGrade(value: unknown): string | null {
   const raw = asString(value);
   if (!raw) return null;
-  const aliases: Record<string, QualityGrade> = {
-    original: QualityGrade.Original,
-    org: QualityGrade.Original,
-    highcopy: QualityGrade.HighCopy,
-    'high copy': QualityGrade.HighCopy,
-    'high-copy': QualityGrade.HighCopy,
-    hc: QualityGrade.HighCopy,
-    copy: QualityGrade.Copy,
-    used: QualityGrade.Used,
-  };
-  const lower = raw.toLowerCase();
-  if (aliases[lower]) return aliases[lower];
-  if (QUALITY_VALUES.has(raw as QualityGrade)) return raw as QualityGrade;
-  return null;
+  return canonicalizeQualityName(raw) || null;
 }
 
 function normalizeHeader(h: string): string {

@@ -23,7 +23,8 @@ export interface ImportProductRow {
   model: string;
   category: string;
   part?: string;
-  qualityGrade: QualityGrade;
+  /** Free-text quality name (aliases normalized at parse time). */
+  qualityGrade: string;
   stockQuantity: number;
   basePrice: number;
   sku?: string;

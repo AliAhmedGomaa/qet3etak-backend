@@ -15,6 +15,7 @@ import { QualityGrade } from '../common/enums/product.enums';
  *   title, brand, model, category, qualityGrade, stockQuantity, basePrice (required)
  *   part?, sku?, isActive?, imageUrl?, tieredPricing? (JSON array or Excel JSON string)
  *   Upsert key: sku if non-empty; else (brand + model + category + part + qualityGrade)
+ *   qualityGrade is upserted into Qualities by name (aliases like org → Original)
  *
  * Brands/categories referenced by products are auto-upserted if missing from
  * dedicated sheets. Products never get a duplicate for the same logical key.
@@ -83,7 +84,10 @@ export const IMPORT_FIELD_DOCS = {
       'tieredPricing',
     ],
   },
-  qualityGradeValues: Object.values(QualityGrade),
+  qualityGradeValues: [
+    ...Object.values(QualityGrade),
+    '(any admin-managed quality name — auto-created on import)',
+  ],
   upsertKeys: {
     brand: 'name (case-insensitive)',
     category: 'name (case-insensitive)',
@@ -92,6 +96,7 @@ export const IMPORT_FIELD_DOCS = {
   },
   notes: [
     'Existing brand/category → reuse (no duplicate). Missing → create.',
+    'qualityGrade string → upsert Quality by name, then attach qualityId on product.',
     'Existing product → update stock/price/title/tiers/flags. Missing → create with placeholder image if imageUrl omitted.',
     'costPrice is not imported (set via purchasing receive).',
     'JSON may be a full object { brands, categories, products } or a bare products array.',

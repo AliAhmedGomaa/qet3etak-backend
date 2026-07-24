@@ -64,6 +64,7 @@ const COLLECTIONS = [
   'push_subscriptions',
   'brands',
   'categories',
+  'qualities',
   'suppliers',
   'purchase_orders',
   'expenses',
@@ -994,7 +995,8 @@ type ProductDoc = {
   model: string;
   category: string;
   part: string;
-  qualityGrade: QualityGrade;
+  qualityId: Types.ObjectId;
+  qualityGrade: string;
   stockQuantity: number;
   basePrice: number;
   tieredPricing: Array<{ minQty: number; price: number }>;
@@ -1040,7 +1042,9 @@ function daysAgo(days: number): Date {
   return d;
 }
 
-function buildProducts(): ProductDoc[] {
+function buildProducts(
+  qualityByGrade: Map<string, Types.ObjectId>,
+): ProductDoc[] {
   const products: ProductDoc[] = [];
   let skuCounter = 1;
 
@@ -1053,6 +1057,8 @@ function buildProducts(): ProductDoc[] {
           .slice(0, gradeCount);
 
         for (const qualityGrade of grades) {
+          const qualityId = qualityByGrade.get(qualityGrade);
+          if (!qualityId) continue;
           const part = rand(PART_NAMES);
           const title = `${model} ${part}`;
           const basePrice = randFloat(
@@ -1082,6 +1088,7 @@ function buildProducts(): ProductDoc[] {
             model,
             category,
             part,
+            qualityId,
             qualityGrade,
             stockQuantity,
             basePrice,
@@ -1160,6 +1167,7 @@ async function main(): Promise<void> {
   const specialCol = db.collection('special_requests');
   const brandsCol = db.collection('brands');
   const categoriesCol = db.collection('categories');
+  const qualitiesCol = db.collection('qualities');
 
   async function ensureSystemRoles(): Promise<Map<string, Types.ObjectId>> {
     const byCode = new Map<string, Types.ObjectId>();
@@ -1409,8 +1417,53 @@ async function main(): Promise<void> {
   await replaceDocs(categoriesCol, categoryDocs);
   console.log(`  ${categoryDocs.length} categories`);
 
+  console.log('Seeding qualities...');
+  const qualityMeta: Array<{
+    name: string;
+    code: string;
+    description: string;
+    sortOrder: number;
+  }> = [
+    {
+      name: QualityGrade.Original,
+      code: 'original',
+      description: 'Genuine / original manufacturer quality',
+      sortOrder: 1,
+    },
+    {
+      name: QualityGrade.HighCopy,
+      code: 'high-copy',
+      description: 'High-quality aftermarket / high copy',
+      sortOrder: 2,
+    },
+    {
+      name: QualityGrade.Copy,
+      code: 'copy',
+      description: 'Standard aftermarket copy',
+      sortOrder: 3,
+    },
+    {
+      name: QualityGrade.Used,
+      code: 'used',
+      description: 'Used / refurbished',
+      sortOrder: 4,
+    },
+  ];
+  const qualityDocs = qualityMeta.map((q) => ({
+    _id: new Types.ObjectId(),
+    ...q,
+    isActive: true,
+    createdAt: daysAgo(100),
+    updatedAt: daysAgo(1),
+  }));
+  await replaceDocs(qualitiesCol, qualityDocs);
+  console.log(`  ${qualityDocs.length} qualities`);
+  const qualityByGrade = new Map(
+    qualityDocs.map((q) => [q.name, q._id] as const),
+  );
+
   console.log('Seeding products...');
-  const products = buildProducts();
+  const products = buildProducts(qualityByGrade);
   await replaceDocs(productsCol, products);
   console.log(`  ${products.length} products`);
 
@@ -1662,6 +1715,8 @@ async function main(): Promise<void> {
   // Unique indexes expected by the app
   await brandsCol.createIndex({ name: 1 }, { unique: true });
   await categoriesCol.createIndex({ name: 1 }, { unique: true });
+  await qualitiesCol.createIndex({ name: 1 }, { unique: true });
+  await qualitiesCol.createIndex({ code: 1 }, { unique: true });
   await users.createIndex({ phone: 1 }, { unique: true });
   await productsCol.createIndex({
     title: 'text',
@@ -1678,6 +1733,7 @@ async function main(): Promise<void> {
     part: 1,
     qualityGrade: 1,
   });
+  await productsCol.createIndex({ qualityId: 1 });
   await ordersCol.createIndex({ orderNumber: 1 }, { unique: true });
   await walletsCol.createIndex({ shopId: 1 }, { unique: true });
 
@@ -1698,6 +1754,7 @@ async function main(): Promise<void> {
   console.log(`  Users:            ${shops.length + 1} (incl. admin)`);
   console.log(`  Brands:           ${brandDocs.length}`);
   console.log(`  Categories:       ${categoryDocs.length}`);
+  console.log(`  Qualities:        ${qualityDocs.length}`);
   console.log(`  Products:         ${products.length}`);
   console.log(`  Orders:           ${orderDocs.length}`);
   console.log(`  Invoices:         ${invoiceCount}`);

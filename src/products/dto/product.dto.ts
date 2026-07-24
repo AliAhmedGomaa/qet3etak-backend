@@ -4,7 +4,7 @@ import {
   ArrayMinSize,
   IsArray,
   IsBoolean,
-  IsEnum,
+  IsMongoId,
   IsNumber,
   IsOptional,
   IsString,
@@ -12,7 +12,6 @@ import {
   MinLength,
   ValidateNested,
 } from 'class-validator';
-import { QualityGrade } from '../../common/enums/product.enums';
 
 function toOptionalBoolean(value: unknown): boolean | undefined {
   if (value === undefined || value === null || value === '') return undefined;
@@ -83,9 +82,23 @@ export class CreateProductDto {
   @MinLength(1)
   part?: string;
 
-  @ApiProperty({ enum: QualityGrade, example: QualityGrade.Original })
-  @IsEnum(QualityGrade)
-  qualityGrade!: QualityGrade;
+  @ApiPropertyOptional({
+    example: '6a5e04e311d9cd2142b060e1',
+    description: 'Preferred: Quality document id (must be active)',
+  })
+  @IsOptional()
+  @IsMongoId()
+  qualityId?: string;
+
+  @ApiPropertyOptional({
+    example: 'Original',
+    description:
+      'Denormalized quality name. Used when qualityId is omitted; resolved against Qualities.',
+  })
+  @IsOptional()
+  @IsString()
+  @MinLength(1)
+  qualityGrade?: string;
 
   @ApiProperty({ example: 100, minimum: 0 })
   @Type(() => Number)
@@ -150,10 +163,22 @@ export class UpdateProductDto {
   @IsString()
   part?: string;
 
-  @ApiPropertyOptional({ enum: QualityGrade, example: QualityGrade.Original })
+  @ApiPropertyOptional({
+    example: '6a5e04e311d9cd2142b060e1',
+    description: 'Preferred: Quality document id (must be active)',
+  })
   @IsOptional()
-  @IsEnum(QualityGrade)
-  qualityGrade?: QualityGrade;
+  @IsMongoId()
+  qualityId?: string;
+
+  @ApiPropertyOptional({
+    example: 'Original',
+    description: 'Denormalized quality name when qualityId is omitted',
+  })
+  @IsOptional()
+  @IsString()
+  @MinLength(1)
+  qualityGrade?: string;
 
   @ApiPropertyOptional({ example: 100, minimum: 0 })
   @IsOptional()
@@ -222,7 +247,9 @@ export class CatalogQueryDto {
   @IsString()
   part?: string;
 
-  @ApiPropertyOptional({ enum: QualityGrade })
+  @ApiPropertyOptional({
+    description: 'Comma-separated quality grade names (denormalized)',
+  })
   @IsOptional()
   @IsString()
   qualityGrade?: string;

@@ -231,6 +231,27 @@ export const SwaggerExamples = {
     summary: 'Create category (optional `icon` file)',
     value: { name: 'Microphones', sortOrder: 11, isActive: true },
   },
+  quality: {
+    summary: 'Quality grade',
+    value: {
+      id: '6a5e04e311d9cd2142b060e1',
+      name: 'Original',
+      code: 'original',
+      description: 'Genuine / original manufacturer quality',
+      isActive: true,
+      sortOrder: 1,
+    },
+  },
+  createQualityRequest: {
+    summary: 'Create quality grade',
+    value: {
+      name: 'OEM',
+      code: 'oem',
+      description: 'OEM parts',
+      sortOrder: 5,
+      isActive: true,
+    },
+  },
 
   // ── Orders ──────────────────────────────────────────────────────────────
   checkoutRequest: {
