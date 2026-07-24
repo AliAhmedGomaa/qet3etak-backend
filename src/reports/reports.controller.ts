@@ -121,6 +121,21 @@ export class ReportsController {
     return this.respond(result, res);
   }
 
+  @Get('returns')
+  @ApiOperation({ summary: 'Returns report by status and refund method' })
+  @ApiProduces('application/json', 'text/csv')
+  async getReturns(
+    @Query() query: ReportQueryDto,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const result = await this.reportsService.getReturns(
+      query.from,
+      query.to,
+      query.format ?? 'json',
+    );
+    return this.respond(result, res);
+  }
+
   @Get('inventory')
   @ApiOperation({
     summary: 'Inventory valuation and low-stock list (point-in-time)',

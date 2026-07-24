@@ -20,7 +20,6 @@ import { ReportsService } from './reports.service';
 @Controller('wholesale/reports')
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles(UserRole.SHOP_OWNER)
-@RequireApproved()
 export class ShopReportsController {
   constructor(private readonly reportsService: ReportsService) {}
 
@@ -29,6 +28,7 @@ export class ShopReportsController {
     summary: 'My shop orders summary for a date range',
   })
   @ApiOkResponse({ description: 'Shop-scoped sales summary' })
+  @RequireApproved()
   myOrders(
     @CurrentUser() user: AuthUser,
     @Query() query: ReportQueryDto,

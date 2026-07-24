@@ -6,6 +6,10 @@ import {
 } from '../delivery/schemas/delivery-guy.schema';
 import { Order, OrderSchema } from '../orders/schemas/order.schema';
 import { Product, ProductSchema } from '../products/schemas/product.schema';
+import {
+  ReturnRequest,
+  ReturnRequestSchema,
+} from '../returns/schemas/return-request.schema';
 import { Wallet, WalletSchema } from '../wallets/schemas/wallet.schema';
 import { ReportsController } from './reports.controller';
 import { ShopReportsController } from './reports.shop.controller';
@@ -18,6 +22,7 @@ import { ReportsService } from './reports.service';
       { name: Wallet.name, schema: WalletSchema },
       { name: Product.name, schema: ProductSchema },
       { name: DeliveryGuy.name, schema: DeliveryGuySchema },
+      { name: ReturnRequest.name, schema: ReturnRequestSchema },
     ]),
   ],
   controllers: [ReportsController, ShopReportsController],
