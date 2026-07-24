@@ -117,7 +117,10 @@ export class PushController {
   @Post('admin/push/broadcast')
   @ApiTags('Admin — Push')
   @ApiBearerAuth('JWT')
-  @ApiOperation({ summary: 'Broadcast a notification to all shop owners' })
+  @ApiOperation({
+    summary:
+      'Broadcast a notification to selected shop owners (or all if shopIds empty)',
+  })
   @ApiBody({ type: BroadcastDto, examples: examples('broadcastRequest') })
   @ApiOkResponse({
     description: 'Broadcast result',
@@ -126,12 +129,14 @@ export class PushController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.ADMIN)
   async broadcast(@Body() dto: BroadcastDto) {
-    const sent = await this.pushService.broadcastToShopOwners({
-      title: dto.title,
-      body: dto.body,
-      url: dto.url || '/home',
-      tag: 'broadcast',
-    });
-    return { sent, enabled: this.pushService.isEnabled() };
+    return this.pushService.broadcastToShopOwners(
+      {
+        title: dto.title,
+        body: dto.body,
+        url: dto.url || '/home',
+        tag: 'broadcast',
+      },
+      dto.shopIds,
+    );
   }
 }

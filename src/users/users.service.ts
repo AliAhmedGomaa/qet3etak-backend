@@ -106,6 +106,26 @@ export class UsersService {
     return paginatedResult(items, total, p.page, p.limit);
   }
 
+  countApprovedShopOwners(): Promise<number> {
+    return this.userModel
+      .countDocuments({
+        role: UserRole.SHOP_OWNER,
+        status: UserStatus.APPROVED,
+      })
+      .exec();
+  }
+
+  findApprovedShopOwnersByIds(ids: string[]): Promise<UserDocument[]> {
+    if (!ids.length) return Promise.resolve([]);
+    return this.userModel
+      .find({
+        _id: { $in: ids },
+        role: UserRole.SHOP_OWNER,
+        status: UserStatus.APPROVED,
+      })
+      .exec();
+  }
+
   async updateShop(
     id: string,
     data: UpdateShopInput,

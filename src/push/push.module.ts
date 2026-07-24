@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
+import { UsersModule } from '../users/users.module';
 import {
   PushSubscriptionEntity,
   PushSubscriptionSchema,
@@ -9,6 +10,7 @@ import { PushService } from './push.service';
 
 @Module({
   imports: [
+    UsersModule,
     MongooseModule.forFeature([
       { name: PushSubscriptionEntity.name, schema: PushSubscriptionSchema },
     ]),

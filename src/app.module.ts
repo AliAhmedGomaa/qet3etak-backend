@@ -22,6 +22,9 @@ import { FinancialsModule } from './financials/financials.module';
 import { ChatModule } from './chat/chat.module';
 import { DeliveryModule } from './delivery/delivery.module';
 import { InvoicesModule } from './invoices/invoices.module';
+import { ImportModule } from './import/import.module';
+import { ReturnsModule } from './returns/returns.module';
+import { ReportsModule } from './reports/reports.module';
 
 @Module({
   imports: [
@@ -51,6 +54,9 @@ import { InvoicesModule } from './invoices/invoices.module';
     ChatModule,
     DeliveryModule,
     InvoicesModule,
+    ImportModule,
+    ReturnsModule,
+    ReportsModule,
   ],
   controllers: [HealthController],
 })

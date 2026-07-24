@@ -22,9 +22,34 @@ import { InvoicesService } from '../invoices/invoices.service';
 import {
   AssignOrderDeliveryDto,
   CheckoutDto,
+  ReorderDto,
   UpdateOrderStatusDto,
 } from './dto/order.dto';
 import { Order, OrderDocument } from './schemas/order.schema';
+
+export type ReorderWarningCode =
+  | 'UNAVAILABLE'
+  | 'OUT_OF_STOCK'
+  | 'QTY_REDUCED'
+  | 'PRICE_CHANGED';
+
+export interface ReorderWarning {
+  code: ReorderWarningCode;
+  productId: string;
+  title: string;
+  message: string;
+  requestedQuantity?: number;
+  availableQuantity?: number;
+  previousUnitPrice?: number;
+  currentUnitPrice?: number;
+}
+
+export interface ReorderResult {
+  order: OrderDocument;
+  warnings: ReorderWarning[];
+  sourceOrderId: string;
+  sourceOrderNumber: string;
+}
 
 const STATUS_FLOW: OrderStatus[] = [
   OrderStatus.RECEIVED,
@@ -152,6 +177,138 @@ export class OrdersService {
       .exec();
     if (!order) throw new NotFoundException('Order not found');
     return order;
+  }
+
+  async getById(orderId: string): Promise<OrderDocument> {
+    if (!Types.ObjectId.isValid(orderId)) {
+      throw new NotFoundException('Order not found');
+    }
+    const order = await this.orderModel.findById(orderId).exec();
+    if (!order) throw new NotFoundException('Order not found');
+    return order;
+  }
+
+  /**
+   * Create a new order from a past order’s line items via the normal checkout
+   * path (live prices, stock decrement, credit checks). Unavailable items are
+   * skipped (or qty capped to stock) with warnings; fails if nothing remains.
+   */
+  async reorder(
+    shopUserId: string,
+    orderId: string,
+    dto: ReorderDto = {},
+  ): Promise<ReorderResult> {
+    const source = await this.getForShop(shopUserId, orderId);
+    const { items, warnings } = await this.resolveReorderItems(source);
+
+    if (!items.length) {
+      throw new BadRequestException({
+        message: 'None of the items from this order are available to reorder',
+        warnings,
+      });
+    }
+
+    const paymentMethod = dto.paymentMethod ?? source.paymentMethod;
+    const notes =
+      dto.notes?.trim() ||
+      `Reorder of ${source.orderNumber}`;
+
+    const order = await this.checkout(shopUserId, {
+      items,
+      paymentMethod,
+      notes,
+    });
+
+    return {
+      order,
+      warnings,
+      sourceOrderId: String(source._id),
+      sourceOrderNumber: source.orderNumber,
+    };
+  }
+
+  private async resolveReorderItems(source: OrderDocument): Promise<{
+    items: CheckoutDto['items'];
+    warnings: ReorderWarning[];
+  }> {
+    const items: CheckoutDto['items'] = [];
+    const warnings: ReorderWarning[] = [];
+
+    for (const line of source.items ?? []) {
+      const productId = String(line.productId);
+      const title = line.title || productId;
+      const requestedQuantity = line.quantity;
+
+      let product;
+      try {
+        product = await this.productsService.findDocumentById(productId);
+      } catch {
+        warnings.push({
+          code: 'UNAVAILABLE',
+          productId,
+          title,
+          message: `${title} is no longer available`,
+          requestedQuantity,
+        });
+        continue;
+      }
+
+      if (!product.isActive) {
+        warnings.push({
+          code: 'UNAVAILABLE',
+          productId,
+          title: product.title,
+          message: `${product.title} is not available`,
+          requestedQuantity,
+        });
+        continue;
+      }
+
+      if (product.stockQuantity <= 0) {
+        warnings.push({
+          code: 'OUT_OF_STOCK',
+          productId,
+          title: product.title,
+          message: `${product.title} is out of stock`,
+          requestedQuantity,
+          availableQuantity: 0,
+        });
+        continue;
+      }
+
+      let quantity = requestedQuantity;
+      if (quantity > product.stockQuantity) {
+        warnings.push({
+          code: 'QTY_REDUCED',
+          productId,
+          title: product.title,
+          message: `${product.title}: quantity reduced from ${requestedQuantity} to ${product.stockQuantity}`,
+          requestedQuantity,
+          availableQuantity: product.stockQuantity,
+        });
+        quantity = product.stockQuantity;
+      }
+
+      const pricing = resolveUnitPrice(
+        quantity,
+        product.basePrice,
+        product.tieredPricing ?? [],
+      );
+      if (Number(line.unitPrice) !== Number(pricing.unitPrice)) {
+        warnings.push({
+          code: 'PRICE_CHANGED',
+          productId,
+          title: product.title,
+          message: `${product.title}: price changed from ${line.unitPrice} to ${pricing.unitPrice}`,
+          previousUnitPrice: line.unitPrice,
+          currentUnitPrice: pricing.unitPrice,
+        });
+      }
+
+      items.push({ productId, quantity });
+    }
+
+    return { items, warnings };
   }
 
   async listAll(

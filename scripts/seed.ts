@@ -9,6 +9,10 @@ import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'fs
 import { join } from 'path';
 import * as bcrypt from 'bcrypt';
 import mongoose, { Types } from 'mongoose';
+import {
+  DeliveryFeeModel,
+  DeliveryGuyStatus,
+} from '../src/common/enums/delivery.enums';
 import { OrderStatus, PaymentMethod, WalletTxType } from '../src/common/enums/order.enums';
 import { QualityGrade } from '../src/common/enums/product.enums';
 import { SpecialRequestStatus } from '../src/common/enums/special-request.enums';
@@ -52,7 +56,115 @@ const COLLECTIONS = [
   'expenses',
   'chat_conversations',
   'chat_messages',
+  'delivery_guys',
 ] as const;
+
+/** Egyptian-style couriers — upserted by phone (safe to re-run). */
+const DELIVERY_GUYS: Array<{
+  fullName: string;
+  phone: string;
+  city: string;
+  vehicleType: string;
+  notes: string;
+  status: DeliveryGuyStatus;
+  feeModel: DeliveryFeeModel;
+  flatFee: number;
+  percentRate: number;
+  baseFee: number;
+  perItemFee: number;
+}> = [
+  {
+    fullName: 'أحمد محمود حسن',
+    phone: '0100501001',
+    city: 'Cairo',
+    vehicleType: 'Motorbike',
+    notes: 'Nasr City & Heliopolis routes',
+    status: DeliveryGuyStatus.ACTIVE,
+    feeModel: DeliveryFeeModel.FLAT,
+    flatFee: 30,
+    percentRate: 0,
+    baseFee: 20,
+    perItemFee: 2,
+  },
+  {
+    fullName: 'محمود إبراهيم علي',
+    phone: '0100501002',
+    city: 'Giza',
+    vehicleType: 'Motorbike',
+    notes: 'Dokki & Mohandessin',
+    status: DeliveryGuyStatus.ACTIVE,
+    feeModel: DeliveryFeeModel.FLAT,
+    flatFee: 35,
+    percentRate: 0,
+    baseFee: 20,
+    perItemFee: 2,
+  },
+  {
+    fullName: 'يوسف عبد الرحمن',
+    phone: '0110501003',
+    city: 'Alexandria',
+    vehicleType: 'Car',
+    notes: 'Smouha & Stanley',
+    status: DeliveryGuyStatus.ACTIVE,
+    feeModel: DeliveryFeeModel.FLAT,
+    flatFee: 40,
+    percentRate: 0,
+    baseFee: 20,
+    perItemFee: 2,
+  },
+  {
+    fullName: 'كريم مصطفى فتحي',
+    phone: '0100501004',
+    city: 'Cairo',
+    vehicleType: 'Motorbike',
+    notes: 'Maadi & New Cairo',
+    status: DeliveryGuyStatus.ACTIVE,
+    feeModel: DeliveryFeeModel.FLAT,
+    flatFee: 28,
+    percentRate: 0,
+    baseFee: 20,
+    perItemFee: 2,
+  },
+  {
+    fullName: 'عمر سعيد خليل',
+    phone: '0120501005',
+    city: 'Mansoura',
+    vehicleType: 'Motorbike',
+    notes: 'Delta coverage',
+    status: DeliveryGuyStatus.ACTIVE,
+    feeModel: DeliveryFeeModel.FLAT,
+    flatFee: 25,
+    percentRate: 0,
+    baseFee: 20,
+    perItemFee: 2,
+  },
+  {
+    fullName: 'حسام الدين ناجي',
+    phone: '0100501006',
+    city: 'Cairo',
+    vehicleType: 'Van',
+    notes: 'Bulk / multi-shop runs',
+    status: DeliveryGuyStatus.ACTIVE,
+    feeModel: DeliveryFeeModel.PERCENT,
+    flatFee: 30,
+    percentRate: 2.5,
+    baseFee: 20,
+    perItemFee: 2,
+  },
+  {
+    fullName: 'طارق حسن الشاذلي',
+    phone: '0150501007',
+    city: 'Giza',
+    vehicleType: 'Motorbike',
+    notes: '6th of October & Sheikh Zayed',
+    status: DeliveryGuyStatus.ACTIVE,
+    feeModel: DeliveryFeeModel.BASE_PLUS_ITEMS,
+    flatFee: 30,
+    percentRate: 0,
+    baseFee: 20,
+    perItemFee: 3,
+  },
+];
 
 const CITIES = [
   'Riyadh',
@@ -139,6 +251,44 @@ const CATEGORY_IMAGES: Record<string, string> = {
 
 function productImageFor(category: string): string {
   return CATEGORY_IMAGES[category] ?? PRODUCT_IMAGE;
+}
+
+async function upsertDeliveryGuys(
+  col: ReturnType<NonNullable<typeof mongoose.connection.db>['collection']>,
+): Promise<number> {
+  const now = new Date();
+  let upserted = 0;
+  for (const guy of DELIVERY_GUYS) {
+    const result = await col.updateOne(
+      { phone: guy.phone },
+      {
+        $set: {
+          fullName: guy.fullName,
+          phone: guy.phone,
+          city: guy.city,
+          vehicleType: guy.vehicleType,
+          notes: guy.notes,
+          status: guy.status,
+          feeModel: guy.feeModel,
+          flatFee: guy.flatFee,
+          percentRate: guy.percentRate,
+          baseFee: guy.baseFee,
+          perItemFee: guy.perItemFee,
+          updatedAt: now,
+        },
+        $setOnInsert: {
+          totalDeliveries: 0,
+          totalFeesEarned: 0,
+          createdAt: now,
+        },
+      },
+      { upsert: true },
+    );
+    if (result.upsertedCount > 0 || result.modifiedCount > 0) upserted++;
+  }
+  await col.createIndex({ phone: 1 }, { unique: true });
+  await col.createIndex({ status: 1 });
+  return upserted;
 }
 
 /** Wipe + insert with retries — a live API may bootstrap brands/categories mid-seed. */

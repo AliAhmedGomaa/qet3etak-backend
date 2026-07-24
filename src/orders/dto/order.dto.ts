@@ -43,6 +43,22 @@ export class CheckoutDto {
   notes?: string;
 }
 
+/** Optional overrides when reordering a past order. */
+export class ReorderDto {
+  @ApiPropertyOptional({
+    enum: PaymentMethod,
+    description: 'Defaults to the source order payment method',
+  })
+  @IsOptional()
+  @IsEnum(PaymentMethod)
+  paymentMethod?: PaymentMethod;
+
+  @ApiPropertyOptional({ example: 'Reorder of QT-20260721-00307' })
+  @IsOptional()
+  @IsString()
+  notes?: string;
+}
+
 export class UpdateOrderStatusDto {
   @ApiProperty({ enum: OrderStatus, example: OrderStatus.PREPARING })
   @IsEnum(OrderStatus)

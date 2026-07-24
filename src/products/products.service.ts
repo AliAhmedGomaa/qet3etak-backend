@@ -198,6 +198,20 @@ export class ProductsService implements OnModuleInit {
     return product;
   }
 
+  /** Restock units from an approved return (no cost recalculation). */
+  async incrementStock(
+    productId: string,
+    quantity: number,
+  ): Promise<ProductDocument> {
+    if (quantity <= 0) {
+      throw new BadRequestException('quantity must be positive');
+    }
+    const product = await this.findDocumentById(productId);
+    product.stockQuantity += quantity;
+    await product.save();
+    return product;
+  }
+
   async remove(id: string): Promise<{ deleted: boolean }> {
     const res = await this.productModel.findByIdAndDelete(id).exec();
     if (!res) throw new NotFoundException('Product not found');

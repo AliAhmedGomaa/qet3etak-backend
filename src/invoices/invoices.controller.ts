@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Controller,
   Get,
   Param,
@@ -78,9 +79,14 @@ export class InvoicesController {
   })
   @Roles(UserRole.ADMIN)
   listInvoices(@Query() query: PaginatedStatusQueryDto) {
-    const status = query.status
-      ? (query.status as InvoiceStatus)
-      : undefined;
+    let status: InvoiceStatus | undefined;
+    if (query.status) {
+      const allowed = Object.values(InvoiceStatus) as string[];
+      if (!allowed.includes(query.status)) {
+        throw new BadRequestException('Invalid invoice status');
+      }
+      status = query.status as InvoiceStatus;
+    }
     return this.invoicesService.listAll(
       query.page,
       query.limit,

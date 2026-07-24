@@ -10,6 +10,13 @@ import type {
 } from './import.types';
 
 const QUALITY_VALUES = new Set(Object.values(QualityGrade));
+const MAX_BYTES = 10 * 1024 * 1024;
+
+export interface ParseOutcome {
+  payload: NormalizedImportPayload;
+  /** Row-level parse failures (file still usable if other rows are valid). */
+  parseErrors: Array<{ entity: string; row: number; message: string }>;
+}
 
 function asString(value: unknown): string {
   if (value == null) return '';
@@ -18,6 +25,13 @@ function asString(value: unknown): string {
     return String(value).trim();
   }
   if (value instanceof Date) return value.toISOString();
+  // ExcelJS rich text / formula results
+  if (typeof value === 'object' && value !== null && 'text' in value) {
+    return asString((value as { text: unknown }).text);
+  }
+  if (typeof value === 'object' && value !== null && 'result' in value) {
+    return asString((value as { result: unknown }).result);
+  }
   return String(value).trim();
 }
 
@@ -36,7 +50,9 @@ function asOptionalBoolean(value: unknown): boolean | undefined {
   return undefined;
 }
 
-function parseTieredPricing(value: unknown): Array<{ minQty: number; price: number }> | undefined {
+function parseTieredPricing(
+  value: unknown,
+): Array<{ minQty: number; price: number }> | undefined {
   if (value == null || value === '') return undefined;
   let parsed: unknown = value;
   if (typeof value === 'string') {
@@ -52,14 +68,19 @@ function parseTieredPricing(value: unknown): Array<{ minQty: number; price: numb
       minQty: Number(t?.minQty),
       price: Number(t?.price),
     }))
-    .filter((t) => Number.isFinite(t.minQty) && t.minQty >= 1 && Number.isFinite(t.price) && t.price >= 0);
+    .filter(
+      (t) =>
+        Number.isFinite(t.minQty) &&
+        t.minQty >= 1 &&
+        Number.isFinite(t.price) &&
+        t.price >= 0,
+    );
   return tiers.length ? tiers : undefined;
 }
 
 function normalizeQualityGrade(value: unknown): QualityGrade | null {
   const raw = asString(value);
   if (!raw) return null;
-  // Accept common aliases
   const aliases: Record<string, QualityGrade> = {
     original: QualityGrade.Original,
     org: QualityGrade.Original,
@@ -76,28 +97,11 @@ function normalizeQualityGrade(value: unknown): QualityGrade | null {
   return null;
 }
 
-function rowToObject(
-  headers: string[],
-  values: unknown[],
-): Record<string, unknown> {
-  const obj: Record<string, unknown> = {};
-  headers.forEach((h, i) => {
-    if (!h) return;
-    obj[h] = values[i];
-  });
-  return obj;
-}
-
 function normalizeHeader(h: string): string {
-  return h
-    .trim()
-    .replace(/\s+/g, '')
-    .replace(/_/g, '')
-    .toLowerCase();
+  return h.trim().replace(/\s+/g, '').replace(/_/g, '').toLowerCase();
 }
 
-/** Map flexible column names → canonical field. */
-const BRAND_HEADER_MAP: Record<string, keyof ImportBrandRow | 'name'> = {
+const BRAND_HEADER_MAP: Record<string, string> = {
   name: 'name',
   brand: 'name',
   brandname: 'name',
@@ -109,7 +113,7 @@ const BRAND_HEADER_MAP: Record<string, keyof ImportBrandRow | 'name'> = {
   icon: 'iconUrl',
 };
 
-const CATEGORY_HEADER_MAP: Record<string, keyof ImportCategoryRow | 'name'> = {
+const CATEGORY_HEADER_MAP: Record<string, string> = {
   name: 'name',
   category: 'name',
   categoryname: 'name',
@@ -161,11 +165,14 @@ function mapRow(
   return out;
 }
 
-function parseBrandRow(raw: Record<string, unknown>, rowIndex: number): ImportBrandRow {
-  const mapped = mapRow(raw, BRAND_HEADER_MAP as Record<string, string>);
+export function parseBrandRow(
+  raw: Record<string, unknown>,
+  rowIndex: number,
+): ImportBrandRow {
+  const mapped = mapRow(raw, BRAND_HEADER_MAP);
   const name = asString(mapped.name);
   if (!name) {
-    throw new BadRequestException(`Brand row ${rowIndex}: name is required`);
+    throw new Error(`Brand row ${rowIndex}: name is required`);
   }
   return {
     name,
@@ -175,14 +182,14 @@ function parseBrandRow(raw: Record<string, unknown>, rowIndex: number): ImportBr
   };
 }
 
-function parseCategoryRow(
+export function parseCategoryRow(
   raw: Record<string, unknown>,
   rowIndex: number,
 ): ImportCategoryRow {
-  const mapped = mapRow(raw, CATEGORY_HEADER_MAP as Record<string, string>);
+  const mapped = mapRow(raw, CATEGORY_HEADER_MAP);
   const name = asString(mapped.name);
   if (!name) {
-    throw new BadRequestException(`Category row ${rowIndex}: name is required`);
+    throw new Error(`Category row ${rowIndex}: name is required`);
   }
   return {
     name,
@@ -192,7 +199,7 @@ function parseCategoryRow(
   };
 }
 
-function parseProductRow(
+export function parseProductRow(
   raw: Record<string, unknown>,
   rowIndex: number,
 ): ImportProductRow {
@@ -214,15 +221,13 @@ function parseProductRow(
   if (stockQuantity == null || stockQuantity < 0) missing.push('stockQuantity');
   if (basePrice == null || basePrice < 0) missing.push('basePrice');
   if (missing.length) {
-    throw new BadRequestException(
+    throw new Error(
       `Product row ${rowIndex}: missing/invalid fields: ${missing.join(', ')}`,
     );
   }
 
   const part =
-    asString(mapped.part) ||
-    inferPartFromTitle(title, model) ||
-    title;
+    asString(mapped.part) || inferPartFromTitle(title, model) || title;
 
   return {
     title,
@@ -240,7 +245,7 @@ function parseProductRow(
   };
 }
 
-function parseJsonPayload(buffer: Buffer): NormalizedImportPayload {
+function parseJsonPayload(buffer: Buffer): ParseOutcome {
   let data: unknown;
   try {
     data = JSON.parse(buffer.toString('utf8'));
@@ -248,161 +253,167 @@ function parseJsonPayload(buffer: Buffer): NormalizedImportPayload {
     throw new BadRequestException('Invalid JSON file');
   }
 
-  // Bare products array
-  if (Array.isArray(data)) {
-    return {
-      brands: [],
-      categories: [],
-      products: data.map((row, i) =>
-        parseProductRow((row ?? {}) as Record<string, unknown>, i + 1),
-      ),
-    };
-  }
+  const parseErrors: ParseOutcome['parseErrors'] = [];
+  const brands: ImportBrandRow[] = [];
+  const categories: ImportCategoryRow[] = [];
+  const products: ImportProductRow[] = [];
 
-  if (!data || typeof data !== 'object') {
+  const pushBrand = (row: unknown, i: number) => {
+    try {
+      brands.push(parseBrandRow((row ?? {}) as Record<string, unknown>, i));
+    } catch (err) {
+      parseErrors.push({
+        entity: 'brand',
+        row: i,
+        message: err instanceof Error ? err.message : 'Invalid brand row',
+      });
+    }
+  };
+  const pushCategory = (row: unknown, i: number) => {
+    try {
+      categories.push(
+        parseCategoryRow((row ?? {}) as Record<string, unknown>, i),
+      );
+    } catch (err) {
+      parseErrors.push({
+        entity: 'category',
+        row: i,
+        message: err instanceof Error ? err.message : 'Invalid category row',
+      });
+    }
+  };
+  const pushProduct = (row: unknown, i: number) => {
+    try {
+      products.push(
+        parseProductRow((row ?? {}) as Record<string, unknown>, i),
+      );
+    } catch (err) {
+      parseErrors.push({
+        entity: 'product',
+        row: i,
+        message: err instanceof Error ? err.message : 'Invalid product row',
+      });
+    }
+  };
+
+  if (Array.isArray(data)) {
+    data.forEach((row, i) => pushProduct(row, i + 1));
+  } else if (data && typeof data === 'object') {
+    const obj = data as Record<string, unknown>;
+    const brandsRaw = Array.isArray(obj.brands) ? obj.brands : [];
+    const categoriesRaw = Array.isArray(obj.categories) ? obj.categories : [];
+    const productsRaw = Array.isArray(obj.products) ? obj.products : [];
+    brandsRaw.forEach((row, i) => pushBrand(row, i + 1));
+    categoriesRaw.forEach((row, i) => pushCategory(row, i + 1));
+    productsRaw.forEach((row, i) => pushProduct(row, i + 1));
+  } else {
     throw new BadRequestException(
       'JSON must be an object { brands?, categories?, products? } or a products array',
     );
   }
 
-  const obj = data as Record<string, unknown>;
-  const brandsRaw = Array.isArray(obj.brands) ? obj.brands : [];
-  const categoriesRaw = Array.isArray(obj.categories) ? obj.categories : [];
-  const productsRaw = Array.isArray(obj.products) ? obj.products : [];
-
-  if (!brandsRaw.length && !categoriesRaw.length && !productsRaw.length) {
+  if (!brands.length && !categories.length && !products.length) {
     throw new BadRequestException(
-      'Import file has no brands, categories, or products',
+      parseErrors.length
+        ? `No valid rows. ${parseErrors[0]?.message ?? ''}`
+        : 'Import file has no brands, categories, or products',
     );
   }
 
-  return {
-    brands: brandsRaw.map((row, i) =>
-      parseBrandRow((row ?? {}) as Record<string, unknown>, i + 1),
-    ),
-    categories: categoriesRaw.map((row, i) =>
-      parseCategoryRow((row ?? {}) as Record<string, unknown>, i + 1),
-    ),
-    products: productsRaw.map((row, i) =>
-      parseProductRow((row ?? {}) as Record<string, unknown>, i + 1),
-    ),
-  };
+  return { payload: { brands, categories, products }, parseErrors };
 }
 
-async function parseExcelPayload(buffer: Buffer): Promise<NormalizedImportPayload> {
+function detectSheetKind(
+  sheetName: string,
+  headers: string[],
+): 'brand' | 'category' | 'product' | null {
+  const name = sheetName.trim().toLowerCase();
+  if (name.includes('brand')) return 'brand';
+  if (name.includes('categor')) return 'category';
+  if (name.includes('product') || name.includes('inventory')) return 'product';
+
+  const norms = headers.map(normalizeHeader).filter(Boolean);
+  const has = (k: string) => norms.includes(k);
+  if (
+    has('title') ||
+    has('sku') ||
+    has('baseprice') ||
+    has('model') ||
+    (has('brand') && has('category'))
+  ) {
+    return 'product';
+  }
+  if (has('name')) return 'brand';
+  return null;
+}
+
+async function parseExcelPayload(buffer: Buffer): Promise<ParseOutcome> {
   const workbook = new ExcelJS.Workbook();
-  // exceljs typings accept Buffer via ArrayBuffer-like; cast for Node Buffer
   await workbook.xlsx.load(buffer as unknown as ExcelJS.Buffer);
 
   const brands: ImportBrandRow[] = [];
   const categories: ImportCategoryRow[] = [];
   const products: ImportProductRow[] = [];
-
-  const softErrors: string[] = [];
+  const parseErrors: ParseOutcome['parseErrors'] = [];
 
   for (const sheet of workbook.worksheets) {
-    const sheetName = (sheet.name || '').trim().toLowerCase();
-    const rows = sheet.getSheetValues() as unknown[][];
-    if (!rows || rows.length < 2) continue;
+    let headers: string[] = [];
+    let kind: 'brand' | 'category' | 'product' | null = null;
 
-    // ExcelJS getSheetValues is 1-indexed; row[0] is undefined
-    const headerRow = (rows[1] ?? []).map((c) => asString(c));
-    const headers = headerRow.map((h) => h);
-
-    const kind: 'brand' | 'category' | 'product' | null =
-      sheetName.includes('brand')
-        ? 'brand'
-        : sheetName.includes('categor')
-          ? 'category'
-          : sheetName.includes('product') || sheetName.includes('inventory')
-            ? 'product'
-            : detectSheetKind(headers);
-
-    if (!kind) continue;
-
-    for (let r = 2; r < rows.length; r++) {
-      const values = (rows[r] ?? []) as unknown[];
-      // Skip empty rows
+    sheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
+      const values = row.values as unknown[];
+      // values[0] is unused (1-based)
       const cells = values.slice(1);
-      if (cells.every((c) => c == null || asString(c) === '')) continue;
 
-      const raw = rowToObject(
-        headers.slice(1).length ? headers.slice(1) : headers,
-        // Align with header indices (ExcelJS may keep index 0 empty)
-        headers[0] === '' ? cells : values.slice(0),
-      );
-
-      // Prefer mapping by header labels at columns 1..n
-      const labeled: Record<string, unknown> = {};
-      for (let c = 1; c < headerRow.length; c++) {
-        const h = headerRow[c];
-        if (!h) continue;
-        labeled[h] = values[c];
+      if (rowNumber === 1) {
+        headers = cells.map((c) => asString(c));
+        kind = detectSheetKind(sheet.name || '', headers);
+        return;
       }
+      if (!kind || !headers.length) return;
+      if (cells.every((c) => c == null || asString(c) === '')) return;
+
+      const labeled: Record<string, unknown> = {};
+      headers.forEach((h, i) => {
+        if (!h) return;
+        labeled[h] = cells[i];
+      });
 
       try {
-        if (kind === 'brand') brands.push(parseBrandRow(labeled, r));
-        else if (kind === 'category') categories.push(parseCategoryRow(labeled, r));
-        else products.push(parseProductRow(labeled, r));
+        if (kind === 'brand') brands.push(parseBrandRow(labeled, rowNumber));
+        else if (kind === 'category') {
+          categories.push(parseCategoryRow(labeled, rowNumber));
+        } else {
+          products.push(parseProductRow(labeled, rowNumber));
+        }
       } catch (err) {
-        softErrors.push(
-          err instanceof Error ? err.message : `Row ${r} on sheet ${sheet.name} failed`,
-        );
+        parseErrors.push({
+          entity: kind,
+          row: rowNumber,
+          message: err instanceof Error ? err.message : 'Invalid row',
+        });
       }
-    }
-  }
-
-  if (softErrors.length && !brands.length && !categories.length && !products.length) {
-    throw new BadRequestException(softErrors.slice(0, 5).join('; '));
+    });
   }
 
   if (!brands.length && !categories.length && !products.length) {
     throw new BadRequestException(
-      'Excel file has no recognizable Brands / Categories / Products sheets or columns',
+      parseErrors.length
+        ? `No valid rows. ${parseErrors[0]?.message ?? ''}`
+        : 'Excel file has no recognizable Brands / Categories / Products sheets',
     );
   }
 
-  // Surface parse errors as a BadRequest if any — caller can still proceed if we
-  // collected valid rows; attach via exception only when all failed above.
-  if (softErrors.length) {
-    // Keep valid rows; service will report row-level errors separately if needed.
-    // For hard invalid cells we already skipped those rows — rethrow summary only
-    // when user would otherwise get a silent partial with no feedback:
-    // We'll attach them by throwing a compound message only if too many?
-    // Better: throw BadRequest listing first errors so user fixes the file.
-    throw new BadRequestException(
-      `Some rows failed validation: ${softErrors.slice(0, 8).join('; ')}${
-        softErrors.length > 8 ? ` (+${softErrors.length - 8} more)` : ''
-      }`,
-    );
-  }
-
-  return { brands, categories, products };
-}
-
-function detectSheetKind(
-  headers: string[],
-): 'brand' | 'category' | 'product' | null {
-  const norms = headers.map((h) => normalizeHeader(h)).filter(Boolean);
-  const has = (k: string) => norms.includes(k);
-  if (has('title') || has('sku') || has('baseprice') || has('model')) {
-    return 'product';
-  }
-  if (has('brand') && has('category') && has('qualitygrade')) return 'product';
-  if (has('name') && !has('title')) {
-    // Ambiguous brand vs category — treat as brand unless sheet says otherwise
-    return 'brand';
-  }
-  return null;
+  return { payload: { brands, categories, products }, parseErrors };
 }
 
 export async function parseImportFile(
   file: Express.Multer.File,
-): Promise<NormalizedImportPayload> {
+): Promise<ParseOutcome> {
   if (!file?.buffer?.length) {
     throw new BadRequestException('Empty import file');
   }
-  if (file.buffer.byteLength > 10 * 1024 * 1024) {
+  if (file.buffer.byteLength > MAX_BYTES) {
     throw new BadRequestException('Import file must be 10MB or smaller');
   }
 

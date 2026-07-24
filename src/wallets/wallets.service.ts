@@ -160,6 +160,44 @@ export class WalletsService {
     return wallet.save();
   }
 
+  /**
+   * Credit adjustment for approved returns on CREDIT orders.
+   * Reduces currentDebt (clamped at 0) and logs WalletTxType.ADJUSTMENT.
+   */
+  async applyReturnCredit(
+    shopId: string,
+    amount: number,
+    orderId: Types.ObjectId,
+    adminId: string,
+    note?: string,
+  ): Promise<WalletDocument> {
+    if (amount <= 0) {
+      throw new BadRequestException('Return credit amount must be positive');
+    }
+    const wallet = await this.ensureForShop(shopId);
+    const applied = Number(
+      Math.min(amount, wallet.currentDebt).toFixed(2),
+    );
+    wallet.currentDebt = Number((wallet.currentDebt - applied).toFixed(2));
+    wallet.transactions.unshift({
+      type: WalletTxType.ADJUSTMENT,
+      amount: -applied,
+      balanceAfter: wallet.currentDebt,
+      note:
+        note?.trim() ||
+        `Return credit ${applied}${applied < amount ? ` (requested ${amount})` : ''}`,
+      orderId,
+      createdBy: new Types.ObjectId(adminId),
+    } as Wallet['transactions'][number]);
+    return wallet.save();
+  }
+
+  async removeForShop(shopId: string): Promise<void> {
+    await this.walletModel
+      .deleteOne({ shopId: new Types.ObjectId(shopId) })
+      .exec();
+  }
+
   async listShopWallets(
     page?: number,
     limit?: number,

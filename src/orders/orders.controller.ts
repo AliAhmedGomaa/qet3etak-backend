@@ -23,7 +23,12 @@ import { Roles } from '../auth/decorators/roles.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import type { AuthUser } from '../auth/guards/roles.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
-import { CheckoutDto, AssignOrderDeliveryDto, UpdateOrderStatusDto } from './dto/order.dto';
+import {
+  AssignOrderDeliveryDto,
+  CheckoutDto,
+  ReorderDto,
+  UpdateOrderStatusDto,
+} from './dto/order.dto';
 import { OrdersService } from './orders.service';
 import { examples } from '../swagger/examples';
 
@@ -74,6 +79,26 @@ export class OrdersController {
   @RequireApproved()
   myOrder(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.ordersService.getForShop(user.userId, id);
+  }
+
+  @Post('wholesale/orders/:id/reorder')
+  @ApiTags('Wholesale — Orders')
+  @ApiOperation({
+    summary:
+      'Reorder a past order (live prices/stock; skips unavailable items with warnings)',
+  })
+  @ApiBody({ type: ReorderDto, required: false })
+  @ApiOkResponse({
+    description: 'New order plus optional warnings about skipped/changed lines',
+  })
+  @Roles(UserRole.SHOP_OWNER)
+  @RequireApproved()
+  reorder(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: ReorderDto,
+  ) {
+    return this.ordersService.reorder(user.userId, id, dto ?? {});
   }
 
   @Get('admin/orders')

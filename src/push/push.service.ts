@@ -1,8 +1,14 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  OnModuleInit,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import * as webpush from 'web-push';
+import { UsersService } from '../users/users.service';
 import {
   PushSubscriptionEntity,
   PushSubscriptionDocument,
@@ -15,6 +21,13 @@ export type PushPayload = {
   tag?: string;
 };
 
+export type BroadcastResult = {
+  targeted: number;
+  sent: number;
+  failed: number;
+  enabled: boolean;
+};
+
 @Injectable()
 export class PushService implements OnModuleInit {
   private readonly logger = new Logger(PushService.name);
@@ -22,6 +35,7 @@ export class PushService implements OnModuleInit {
 
   constructor(
     private readonly config: ConfigService,
+    private readonly usersService: UsersService,
     @InjectModel(PushSubscriptionEntity.name)
     private readonly subModel: Model<PushSubscriptionEntity>,
   ) {}
@@ -96,16 +110,45 @@ export class PushService implements OnModuleInit {
     const subs = await this.subModel
       .find({ userId: new Types.ObjectId(userId) })
       .exec();
-    return this.sendToSubs(subs, payload);
+    const { sent } = await this.sendToSubs(subs, payload);
+    return sent;
   }
 
-  async broadcastToShopOwners(payload: PushPayload): Promise<number> {
+  async broadcastToShopOwners(
+    payload: PushPayload,
+    shopIds?: string[],
+  ): Promise<BroadcastResult> {
     if (!this.enabled) {
       this.logger.warn('broadcast skipped — VAPID not enabled');
-      return 0;
+      return { targeted: 0, sent: 0, failed: 0, enabled: false };
     }
-    const subs = await this.subModel.find({ audience: 'SHOP_OWNER' }).exec();
-    return this.sendToSubs(subs, payload);
+
+    const filter: Record<string, unknown> = { audience: 'SHOP_OWNER' };
+    let targeted: number;
+
+    const selected = [...new Set((shopIds ?? []).map((id) => id.trim()).filter(Boolean))];
+
+    if (selected.length) {
+      const shops =
+        await this.usersService.findApprovedShopOwnersByIds(selected);
+      if (shops.length !== selected.length) {
+        const found = new Set(shops.map((s) => String(s._id)));
+        const invalidShopIds = selected.filter((id) => !found.has(id));
+        throw new BadRequestException({
+          message:
+            'Some shopIds are invalid or not eligible (must be approved shop owners)',
+          invalidShopIds,
+        });
+      }
+      filter['userId'] = { $in: shops.map((s) => s._id) };
+      targeted = shops.length;
+    } else {
+      targeted = await this.usersService.countApprovedShopOwners();
+    }
+
+    const subs = await this.subModel.find(filter).exec();
+    const { sent, failed } = await this.sendToSubs(subs, payload);
+    return { targeted, sent, failed, enabled: true };
   }
 
   async notifyAdmins(payload: PushPayload): Promise<number> {
@@ -114,16 +157,17 @@ export class PushService implements OnModuleInit {
       return 0;
     }
     const subs = await this.subModel.find({ audience: 'ADMIN' }).exec();
-    return this.sendToSubs(subs, payload);
+    const { sent } = await this.sendToSubs(subs, payload);
+    return sent;
   }
 
   private async sendToSubs(
     subs: PushSubscriptionDocument[],
     payload: PushPayload,
-  ): Promise<number> {
+  ): Promise<{ sent: number; failed: number }> {
     if (!subs.length) {
       this.logger.debug('No push subscriptions for payload');
-      return 0;
+      return { sent: 0, failed: 0 };
     }
 
     // Angular ngsw expects { notification: { title, body, ... } }
@@ -149,6 +193,7 @@ export class PushService implements OnModuleInit {
     });
 
     let sent = 0;
+    let failed = 0;
     await Promise.all(
       subs.map(async (sub) => {
         try {
@@ -165,6 +210,7 @@ export class PushService implements OnModuleInit {
           );
           sent += 1;
         } catch (err: unknown) {
+          failed += 1;
           const status = (err as { statusCode?: number })?.statusCode;
           const message = (err as Error)?.message;
           this.logger.warn(
@@ -177,6 +223,6 @@ export class PushService implements OnModuleInit {
       }),
     );
     this.logger.log(`Push sent ${sent}/${subs.length}`);
-    return sent;
+    return { sent, failed };
   }
 }

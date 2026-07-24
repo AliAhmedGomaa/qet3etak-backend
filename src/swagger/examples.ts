@@ -371,16 +371,17 @@ export const SwaggerExamples = {
     value: { endpoint: 'https://fcm.googleapis.com/fcm/send/abc123' },
   },
   broadcastRequest: {
-    summary: 'Broadcast to all shops',
+    summary: 'Broadcast to selected shops (omit shopIds for all)',
     value: {
       title: 'New stock arrived',
       body: 'iPhone 15 screens now available',
       url: '/catalog?brand=Apple',
+      shopIds: ['6a5ed4b2f718e30c208e48d0'],
     },
   },
   broadcastResponse: {
     summary: 'Broadcast result',
-    value: { sent: 42 },
+    value: { targeted: 12, sent: 18, failed: 1, enabled: true },
   },
 
   // ── Chat ────────────────────────────────────────────────────────────────

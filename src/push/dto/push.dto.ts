@@ -1,6 +1,9 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
+  ArrayUnique,
+  IsArray,
+  IsMongoId,
   IsNumber,
   IsOptional,
   IsString,
@@ -45,6 +48,19 @@ export class BroadcastDto {
   @IsOptional()
   @IsString()
   url?: string;
+
+  /** When empty/omitted, broadcast goes to all approved shop owners. */
+  @ApiPropertyOptional({
+    type: [String],
+    example: ['6a5ed4b2f718e30c208e48d0'],
+    description:
+      'Optional shop owner user ids. Empty/omitted = all approved shops.',
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayUnique()
+  @IsMongoId({ each: true })
+  shopIds?: string[];
 }
 
 export class CreateSpecialRequestDto {

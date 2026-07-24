@@ -35,6 +35,7 @@ export function setupSwagger(app: INestApplication): void {
     .addTag('Wholesale — Brands', 'Active brands for filters')
     .addTag('Wholesale — Categories', 'Active categories for filters')
     .addTag('Wholesale — Special Requests', 'Rare-part requests from shops')
+    .addTag('Wholesale — Returns', 'Return requests from shops')
     .addTag('Wholesale — Push', 'Web Push subscriptions (shop)')
     .addTag('Wholesale — Chat', 'Shop ↔ admin messaging')
     .addTag('Admin — Shops', 'Shop approval workflow')
@@ -45,11 +46,13 @@ export function setupSwagger(app: INestApplication): void {
     .addTag('Admin — Invoices', 'Platform invoices list / void')
     .addTag('Admin — Wallets', 'Credit limits and payments')
     .addTag('Admin — Special Requests', 'Quote / fulfill rare parts')
+    .addTag('Admin — Returns', 'Review / approve / reject return requests')
     .addTag('Admin — Push', 'Broadcast and admin push subscriptions')
     .addTag('Admin — Chat', 'Admin side of shop chat')
     .addTag('Admin — Purchasing', 'Suppliers and purchase orders')
     .addTag('Admin — Financials', 'P&L, expenses, damaged stock')
     .addTag('Admin — Delivery', 'Delivery guys, fees, and assignment')
+    .addTag('Admin — Import', 'Bulk Excel/JSON upsert for brands, categories, products')
     .build();
 
   const document = SwaggerModule.createDocument(app, config, {
