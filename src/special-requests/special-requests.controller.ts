@@ -21,14 +21,14 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { diskStorage } from 'multer';
-import { extname, join } from 'path';
-import { existsSync, mkdirSync } from 'fs';
+import { extname } from 'path';
 import { SpecialRequestStatus } from '../common/enums/special-request.enums';
 import { UserRole } from '../common/enums/user.enums';
 import {
   PaginatedStatusQueryDto,
   PaginationQueryDto,
 } from '../common/pagination';
+import { ensureUploadsDir } from '../common/uploads';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { RequireApproved } from '../auth/decorators/require-approved.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -41,11 +41,6 @@ import {
 } from '../push/dto/push.dto';
 import { SpecialRequestsService } from './special-requests.service';
 import { examples } from '../swagger/examples';
-
-const uploadsDir = join(process.cwd(), 'uploads');
-if (!existsSync(uploadsDir)) {
-  mkdirSync(uploadsDir, { recursive: true });
-}
 
 @Controller()
 @ApiBearerAuth('JWT')
@@ -86,7 +81,7 @@ export class SpecialRequestsController {
   @UseInterceptors(
     FileInterceptor('photo', {
       storage: diskStorage({
-        destination: uploadsDir,
+        destination: (_req, _file, cb) => cb(null, ensureUploadsDir()),
         filename: (_req, file, cb) => {
           const unique = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
           cb(null, `rare-${unique}${extname(file.originalname).toLowerCase()}`);

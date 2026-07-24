@@ -21,10 +21,10 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { diskStorage } from 'multer';
-import { existsSync, mkdirSync } from 'fs';
-import { extname, join } from 'path';
+import { extname } from 'path';
 import { UserRole } from '../common/enums/user.enums';
 import { PaginationQueryDto } from '../common/pagination';
+import { ensureUploadsDir } from '../common/uploads';
 import { RequireApproved } from '../auth/decorators/require-approved.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -33,14 +33,9 @@ import { CategoriesService } from './categories.service';
 import { CreateCategoryDto, UpdateCategoryDto } from './dto/category.dto';
 import { examples } from '../swagger/examples';
 
-const uploadsDir = join(process.cwd(), 'uploads');
-if (!existsSync(uploadsDir)) {
-  mkdirSync(uploadsDir, { recursive: true });
-}
-
 const iconUpload = FileInterceptor('icon', {
   storage: diskStorage({
-    destination: uploadsDir,
+    destination: (_req, _file, cb) => cb(null, ensureUploadsDir()),
     filename: (_req, file, cb) => {
       const unique = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
       cb(null, `category-${unique}${extname(file.originalname).toLowerCase()}`);

@@ -3,10 +3,10 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { MongooseModule } from '@nestjs/mongoose';
 import { ServeStaticModule } from '@nestjs/serve-static';
 import * as bcrypt from 'bcrypt';
-import { join } from 'path';
 import { AdminModule } from './admin/admin.module';
 import { AuthModule } from './auth/auth.module';
 import { UserRole, UserStatus } from './common/enums/user.enums';
+import { ensureUploadsDir } from './common/uploads';
 import { HealthController } from './health.controller';
 import { UsersModule } from './users/users.module';
 import { UsersService } from './users/users.service';
@@ -34,7 +34,7 @@ import { ChatModule } from './chat/chat.module';
       }),
     }),
     ServeStaticModule.forRoot({
-      rootPath: join(process.cwd(), 'uploads'),
+      rootPath: ensureUploadsDir(),
       serveRoot: '/uploads',
     }),
     UsersModule,

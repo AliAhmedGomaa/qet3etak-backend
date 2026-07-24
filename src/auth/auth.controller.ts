@@ -17,8 +17,7 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { diskStorage } from 'multer';
-import { extname, join } from 'path';
-import { existsSync, mkdirSync } from 'fs';
+import { extname } from 'path';
 import { CurrentUser } from './decorators/current-user.decorator';
 import { LoginDto } from './dto/login.dto';
 import { RegisterShopDto } from './dto/register-shop.dto';
@@ -26,11 +25,7 @@ import type { AuthUser } from './guards/roles.guard';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { AuthService } from './auth.service';
 import { examples } from '../swagger/examples';
-
-const uploadsDir = join(process.cwd(), 'uploads');
-if (!existsSync(uploadsDir)) {
-  mkdirSync(uploadsDir, { recursive: true });
-}
+import { ensureUploadsDir } from '../common/uploads';
 
 @ApiTags('Auth')
 @Controller('auth')
@@ -78,7 +73,7 @@ export class AuthController {
   @UseInterceptors(
     FileInterceptor('commercialRegPhoto', {
       storage: diskStorage({
-        destination: uploadsDir,
+        destination: (_req, _file, cb) => cb(null, ensureUploadsDir()),
         filename: (_req, file, cb) => {
           const unique = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
           cb(null, `shop-${unique}${extname(file.originalname).toLowerCase()}`);
