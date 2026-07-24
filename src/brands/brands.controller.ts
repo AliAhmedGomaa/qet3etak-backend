@@ -20,11 +20,9 @@ import {
   ApiOperation,
   ApiTags,
 } from '@nestjs/swagger';
-import { diskStorage } from 'multer';
-import { extname } from 'path';
 import { UserRole } from '../common/enums/user.enums';
 import { PaginationQueryDto } from '../common/pagination';
-import { ensureUploadsDir } from '../common/uploads';
+import { imageUploadOptions } from '../common/multer-image';
 import { RequireApproved } from '../auth/decorators/require-approved.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -33,22 +31,10 @@ import { BrandsService } from './brands.service';
 import { CreateBrandDto, UpdateBrandDto } from './dto/brand.dto';
 import { examples } from '../swagger/examples';
 
-const iconUpload = FileInterceptor('icon', {
-  storage: diskStorage({
-    destination: (_req, _file, cb) => cb(null, ensureUploadsDir()),
-    filename: (_req, file, cb) => {
-      const unique = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
-      cb(null, `brand-${unique}${extname(file.originalname).toLowerCase()}`);
-    },
-  }),
-  limits: { fileSize: 4 * 1024 * 1024 },
-  fileFilter: (_req, file, cb) => {
-    if (!file.mimetype.match(/^image\/(jpeg|jpg|png|webp|svg\+xml)$/)) {
-      return cb(new Error('Only image uploads are allowed'), false);
-    }
-    cb(null, true);
-  },
-});
+const iconUpload = FileInterceptor(
+  'icon',
+  imageUploadOptions('brand', { allowSvg: true }),
+);
 
 @Controller()
 export class BrandsController {
@@ -89,7 +75,7 @@ export class BrandsController {
   @ApiBearerAuth('JWT')
   @ApiOperation({
     summary: 'Create a brand (admin)',
-    description: 'Multipart form: text fields + optional `icon` image (jpeg/png/webp/svg, max 4MB).',
+    description: 'Multipart form: text fields + optional `icon` image (jpeg/png/webp/svg, max 3MB).',
   })
   @ApiConsumes('multipart/form-data')
   @ApiBody({

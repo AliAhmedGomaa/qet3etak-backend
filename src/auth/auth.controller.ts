@@ -16,8 +16,6 @@ import {
   ApiOperation,
   ApiTags,
 } from '@nestjs/swagger';
-import { diskStorage } from 'multer';
-import { extname } from 'path';
 import { CurrentUser } from './decorators/current-user.decorator';
 import { LoginDto } from './dto/login.dto';
 import { RegisterShopDto } from './dto/register-shop.dto';
@@ -25,7 +23,7 @@ import type { AuthUser } from './guards/roles.guard';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { AuthService } from './auth.service';
 import { examples } from '../swagger/examples';
-import { ensureUploadsDir } from '../common/uploads';
+import { imageUploadOptions } from '../common/multer-image';
 
 @ApiTags('Auth')
 @Controller('auth')
@@ -36,7 +34,7 @@ export class AuthController {
   @ApiOperation({
     summary: 'Register a new shop (pending verification)',
     description:
-      'Multipart form: text fields + optional `commercialRegPhoto` image (jpeg/png/webp, max 8MB).',
+      'Multipart form: text fields + optional `commercialRegPhoto` image (jpeg/png/webp, max 3MB).',
   })
   @ApiConsumes('multipart/form-data')
   @ApiBody({
@@ -61,7 +59,7 @@ export class AuthController {
         commercialRegPhoto: {
           type: 'string',
           format: 'binary',
-          description: 'Commercial registration photo',
+          description: 'Commercial registration photo (max 3MB)',
         },
       },
     },
@@ -71,22 +69,7 @@ export class AuthController {
     schema: { example: examples('registerShopResponse').registerShopResponse.value },
   })
   @UseInterceptors(
-    FileInterceptor('commercialRegPhoto', {
-      storage: diskStorage({
-        destination: (_req, _file, cb) => cb(null, ensureUploadsDir()),
-        filename: (_req, file, cb) => {
-          const unique = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
-          cb(null, `shop-${unique}${extname(file.originalname).toLowerCase()}`);
-        },
-      }),
-      limits: { fileSize: 8 * 1024 * 1024 },
-      fileFilter: (_req, file, cb) => {
-        if (!file.mimetype.match(/^image\/(jpeg|jpg|png|webp)$/)) {
-          return cb(new Error('Only image uploads are allowed'), false);
-        }
-        cb(null, true);
-      },
-    }),
+    FileInterceptor('commercialRegPhoto', imageUploadOptions('shop')),
   )
   registerShop(
     @Body() dto: RegisterShopDto,

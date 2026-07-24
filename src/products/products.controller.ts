@@ -21,11 +21,9 @@ import {
   ApiOperation,
   ApiTags,
 } from '@nestjs/swagger';
-import { diskStorage } from 'multer';
-import { extname } from 'path';
 import { UserRole } from '../common/enums/user.enums';
 import { PaginationQueryDto } from '../common/pagination';
-import { ensureUploadsDir } from '../common/uploads';
+import { imageUploadOptions } from '../common/multer-image';
 import { RequireApproved } from '../auth/decorators/require-approved.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -39,22 +37,10 @@ import {
 import { ProductsService } from './products.service';
 import { examples } from '../swagger/examples';
 
-const productImageUpload = FileInterceptor('image', {
-  storage: diskStorage({
-    destination: (_req, _file, cb) => cb(null, ensureUploadsDir()),
-    filename: (_req, file, cb) => {
-      const unique = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
-      cb(null, `product-${unique}${extname(file.originalname).toLowerCase()}`);
-    },
-  }),
-  limits: { fileSize: 8 * 1024 * 1024 },
-  fileFilter: (_req, file, cb) => {
-    if (!file.mimetype.match(/^image\/(jpeg|jpg|png|webp)$/)) {
-      return cb(new Error('Only JPEG, PNG, or WebP images are allowed'), false);
-    }
-    cb(null, true);
-  },
-});
+const productImageUpload = FileInterceptor(
+  'image',
+  imageUploadOptions('product'),
+);
 
 @Controller()
 export class ProductsController {

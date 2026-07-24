@@ -20,15 +20,13 @@ import {
   ApiOperation,
   ApiTags,
 } from '@nestjs/swagger';
-import { diskStorage } from 'multer';
-import { extname } from 'path';
 import { SpecialRequestStatus } from '../common/enums/special-request.enums';
 import { UserRole } from '../common/enums/user.enums';
 import {
   PaginatedStatusQueryDto,
   PaginationQueryDto,
 } from '../common/pagination';
-import { ensureUploadsDir } from '../common/uploads';
+import { imageUploadOptions } from '../common/multer-image';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { RequireApproved } from '../auth/decorators/require-approved.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -52,7 +50,8 @@ export class SpecialRequestsController {
   @ApiTags('Wholesale — Special Requests')
   @ApiOperation({
     summary: 'Create a special/rare part request',
-    description: 'Multipart form: text fields + optional `photo` image (jpeg/png/webp, max 10MB).',
+    description:
+      'Multipart form: text fields + optional `photo` image (jpeg/png/webp, max 3MB).',
   })
   @ApiConsumes('multipart/form-data')
   @ApiBody({
@@ -67,7 +66,7 @@ export class SpecialRequestsController {
         photo: {
           type: 'string',
           format: 'binary',
-          description: 'Reference photo of the part',
+          description: 'Reference photo of the part (max 3MB)',
         },
       },
     },
@@ -78,24 +77,7 @@ export class SpecialRequestsController {
   })
   @Roles(UserRole.SHOP_OWNER)
   @RequireApproved()
-  @UseInterceptors(
-    FileInterceptor('photo', {
-      storage: diskStorage({
-        destination: (_req, _file, cb) => cb(null, ensureUploadsDir()),
-        filename: (_req, file, cb) => {
-          const unique = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
-          cb(null, `rare-${unique}${extname(file.originalname).toLowerCase()}`);
-        },
-      }),
-      limits: { fileSize: 10 * 1024 * 1024 },
-      fileFilter: (_req, file, cb) => {
-        if (!file.mimetype.match(/^image\/(jpeg|jpg|png|webp)$/)) {
-          return cb(new Error('Only image uploads are allowed'), false);
-        }
-        cb(null, true);
-      },
-    }),
-  )
+  @UseInterceptors(FileInterceptor('photo', imageUploadOptions('rare')))
   create(
     @CurrentUser() user: AuthUser,
     @Body() dto: CreateSpecialRequestDto,

@@ -1,5 +1,6 @@
-import { copyFileSync, existsSync, mkdirSync, readdirSync } from 'fs';
+import { copyFileSync, existsSync, mkdirSync, readdirSync, writeFileSync } from 'fs';
 import { join } from 'path';
+import { EMBEDDED_PLACEHOLDER_PNGS } from './embedded-placeholders';
 
 /**
  * Local disk for uploaded images.
@@ -7,11 +8,13 @@ import { join } from 'path';
  * Serverless runtimes (Vercel / Lambda) mount the app under `/var/task` as
  * read-only — only `/tmp` is writable — so we detect that and redirect there.
  *
- * Placeholder / seed images are tracked under `src/assets/uploads`, included in
- * the Vercel function bundle (vercel.json includeFiles + nest-cli assets), and
- * copied into the writable uploads dir on boot when possible.
- * User uploads on serverless still do not persist across cold starts — use
- * object storage (S3, Blob, etc.) for durable user media.
+ * Placeholder images are:
+ * 1. Tracked under `src/assets/uploads` (nest-cli assets / Docker)
+ * 2. Embedded as base64 in `embedded-placeholders.ts` for Vercel (JS bundle)
+ *
+ * On boot we seed the writable uploads dir from filesystem assets when present,
+ * otherwise from the embedded base64 map. User uploads on serverless still do
+ * not persist across cold starts — use object storage for durable user media.
  */
 function isServerlessRuntime(): boolean {
   return (
@@ -30,35 +33,21 @@ export function getUploadsDir(): string {
 }
 
 /** Known seed / placeholder filenames shipped with the API. */
-export const BUNDLED_UPLOAD_FILES = [
-  'admin-placeholder.png',
-  'shop-placeholder.png',
-  'product-placeholder.png',
-  'product-screens.png',
-  'product-batteries.png',
-  'product-charging.png',
-  'product-covers.png',
-  'product-cameras.png',
-  'product-flex.png',
-  'product-generic.png',
-] as const;
+export const BUNDLED_UPLOAD_FILES = Object.keys(
+  EMBEDDED_PLACEHOLDER_PNGS,
+) as string[];
 
 /**
- * Resolve the directory that contains bundled placeholder images.
- * Checked in order for Nest build output, Vercel function layout, and local dev.
+ * Resolve the directory that contains bundled placeholder images on disk.
  */
 export function getBundledUploadsDir(): string | null {
   const candidates = [
-    // Source tree (also shipped via vercel.json includeFiles)
     join(process.cwd(), 'src', 'assets', 'uploads'),
-    // Nest CLI assets: dist/assets/uploads
     join(process.cwd(), 'dist', 'assets', 'uploads'),
     join(process.cwd(), 'dist', 'src', 'assets', 'uploads'),
-    // Relative to this module (dist/src/common or similar)
     join(__dirname, '..', '..', 'assets', 'uploads'),
     join(__dirname, '..', 'assets', 'uploads'),
     join(__dirname, 'assets', 'uploads'),
-    // Absolute under /var/task (Vercel)
     join('/var/task', 'src', 'assets', 'uploads'),
     join('/var/task', 'dist', 'assets', 'uploads'),
   ];
@@ -72,7 +61,7 @@ export function getBundledUploadsDir(): string | null {
 }
 
 /**
- * Copy bundled placeholders into the writable uploads directory.
+ * Copy / write bundled placeholders into the writable uploads directory.
  * Safe to call on every cold start; skips files that already exist.
  */
 export function seedBundledPlaceholders(destDir?: string): string {
@@ -89,33 +78,31 @@ export function seedBundledPlaceholders(destDir?: string): string {
   }
 
   const sourceDir = getBundledUploadsDir();
-  if (!sourceDir) {
-    console.warn(
-      'Bundled placeholder uploads not found — /uploads placeholders may 404',
-    );
-    return dir;
-  }
-
-  let names: string[] = [...BUNDLED_UPLOAD_FILES];
-  try {
-    names = [
-      ...new Set([
-        ...names,
-        ...readdirSync(sourceDir).filter((n) =>
+  const names = new Set<string>([
+    ...Object.keys(EMBEDDED_PLACEHOLDER_PNGS),
+    ...(sourceDir
+      ? readdirSync(sourceDir).filter((n) =>
           /\.(png|jpe?g|webp|gif|svg)$/i.test(n),
-        ),
-      ]),
-    ];
-  } catch {
-    // keep BUNDLED_UPLOAD_FILES only
-  }
+        )
+      : []),
+  ]);
 
   for (const name of names) {
-    const src = join(sourceDir, name);
     const dest = join(dir, name);
-    if (!existsSync(src) || existsSync(dest)) continue;
+    if (existsSync(dest)) continue;
+
     try {
-      copyFileSync(src, dest);
+      if (sourceDir) {
+        const src = join(sourceDir, name);
+        if (existsSync(src)) {
+          copyFileSync(src, dest);
+          continue;
+        }
+      }
+      const b64 = EMBEDDED_PLACEHOLDER_PNGS[name];
+      if (b64) {
+        writeFileSync(dest, Buffer.from(b64, 'base64'));
+      }
     } catch (err) {
       console.warn(
         `Could not seed placeholder ${name}: ${(err as Error).message}`,
@@ -132,8 +119,8 @@ export function ensureUploadsDir(): string {
 }
 
 /**
- * Static roots for ServeStaticModule: writable uploads first, then bundled
- * placeholders (so seed images work even if /tmp seeding fails).
+ * Static roots for ServeStaticModule: writable uploads first, then on-disk
+ * bundled placeholders when available (local / Docker).
  */
 export function getUploadsStaticRoots(): { rootPath: string; serveRoot: string }[] {
   const writable = ensureUploadsDir();

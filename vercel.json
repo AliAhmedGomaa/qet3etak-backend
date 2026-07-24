@@ -16,10 +16,5 @@
         { "key": "Vary", "value": "Origin" }
       ]
     }
-  ],
-  "functions": {
-    "src/main.ts": {
-      "includeFiles": "{dist/assets/uploads/**,src/assets/uploads/**}"
-    }
-  }
+  ]
 }
