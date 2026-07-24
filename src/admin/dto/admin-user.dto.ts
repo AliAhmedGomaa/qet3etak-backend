@@ -2,15 +2,16 @@ import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger';
 import {
   IsBoolean,
   IsEnum,
-  IsIn,
+  IsMongoId,
   IsOptional,
   IsString,
   Matches,
   MinLength,
+  ValidateIf,
 } from 'class-validator';
 import { UserRole, UserStatus } from '../../common/enums/user.enums';
 
-/** Roles assignable via the admin users API (never SHOP_OWNER). */
+/** Legacy assignable staff role codes (never SHOP_OWNER). */
 export const ASSIGNABLE_STAFF_ROLES = [
   UserRole.ADMIN,
   UserRole.MANAGER,
@@ -36,13 +37,23 @@ export class CreateAdminUserDto {
   @MinLength(6)
   password!: string;
 
-  @ApiProperty({
+  @ApiPropertyOptional({
+    example: '665f1a2b3c4d5e6f7a8b9c0d',
+    description: 'Preferred: Role document id',
+  })
+  @ValidateIf((o: CreateAdminUserDto) => !o.role)
+  @IsMongoId()
+  roleId?: string;
+
+  @ApiPropertyOptional({
     enum: ASSIGNABLE_STAFF_ROLES,
     example: UserRole.STAFF,
-    description: 'Admin-panel role (SHOP_OWNER is not allowed)',
+    description: 'Role code (used when roleId omitted). Still supported.',
   })
-  @IsIn(ASSIGNABLE_STAFF_ROLES)
-  role!: UserRole;
+  @ValidateIf((o: CreateAdminUserDto) => !o.roleId)
+  @IsString()
+  @MinLength(2)
+  role?: string;
 
   @ApiPropertyOptional({
     enum: [UserStatus.APPROVED, UserStatus.SUSPENDED],

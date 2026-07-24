@@ -24,16 +24,13 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import type { AuthUser } from '../auth/guards/roles.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import {
-  ADMIN_PANEL_ROLES,
-  ADMIN_ROLE_DEFINITIONS,
   UserRole,
   UserStatus,
-  isAdminPanelRole,
 } from '../common/enums/user.enums';
 import { PaginatedStatusQueryDto } from '../common/pagination';
+import { RolesService } from '../roles/roles.service';
 import { UsersService } from '../users/users.service';
 import {
-  ASSIGNABLE_STAFF_ROLES,
   CreateAdminUserDto,
   UpdateAdminUserDto,
 } from './dto/admin-user.dto';
@@ -44,34 +41,16 @@ import {
 @UseGuards(JwtAuthGuard, RolesGuard)
 @UnscopedAdminOnly()
 export class AdminUsersController {
-  constructor(private readonly usersService: UsersService) {}
-
-  @Get('roles')
-  @ApiOperation({ summary: 'List admin-panel role definitions' })
-  listRoles() {
-    return {
-      items: ADMIN_ROLE_DEFINITIONS.map((r) => ({
-        ...r,
-        canAccessAdmin: true,
-      })),
-    };
-  }
+  constructor(
+    private readonly usersService: UsersService,
+    private readonly rolesService: RolesService,
+  ) {}
 
   @Get('users')
   @ApiOperation({
     summary: 'List admin-panel staff users (excludes shop owners)',
   })
   async listUsers(@Query() query: PaginatedStatusQueryDto) {
-    let role: UserRole | undefined;
-    if (query.role) {
-      if (!isAdminPanelRole(query.role as UserRole)) {
-        throw new BadRequestException(
-          `role must be one of: ${ADMIN_PANEL_ROLES.join(', ')}`,
-        );
-      }
-      role = query.role as UserRole;
-    }
-
     let status: UserStatus | undefined;
     if (query.status) {
       if (!Object.values(UserStatus).includes(query.status as UserStatus)) {
@@ -82,12 +61,21 @@ export class AdminUsersController {
       status = query.status as UserStatus;
     }
 
+    const roleCode = query.role?.trim() || undefined;
+    if (roleCode) {
+      const role = await this.rolesService.findByCode(roleCode);
+      if (!role || !role.adminPanel) {
+        throw new BadRequestException(`Unknown or non-panel role: ${roleCode}`);
+      }
+    }
+
     const result = await this.usersService.findStaff(
-      role,
+      roleCode,
       status,
       query.page,
       query.limit,
       query.q,
+      query.roleId,
     );
     return {
       ...result,
@@ -101,8 +89,12 @@ export class AdminUsersController {
     @CurrentUser() actor: AuthUser,
     @Body() dto: CreateAdminUserDto,
   ) {
-    this.assertAssignableRole(dto.role);
-    this.assertCanAssignRole(actor, dto.role);
+    if (!dto.roleId && !dto.role) {
+      throw new BadRequestException('roleId or role is required');
+    }
+
+    const role = await this.resolveAssignableRole(dto.roleId, dto.role);
+    this.assertCanAssignRole(actor, role.code);
 
     const phone = dto.phone.trim();
     const existing = await this.usersService.findByPhone(phone);
@@ -121,7 +113,8 @@ export class AdminUsersController {
       address: '—',
       commercialRegPhotoUrl: '/uploads/admin-placeholder.png',
       passwordHash,
-      role: dto.role,
+      roleId: String(role._id),
+      role: role.code,
       status,
     });
 
@@ -146,15 +139,19 @@ export class AdminUsersController {
   ) {
     const existing = await this.usersService.findStaffByIdOrFail(id);
 
-    if (dto.role !== undefined) {
-      this.assertAssignableRole(dto.role);
-      this.assertCanAssignRole(actor, dto.role);
+    let nextRoleCode = String(existing.role);
+    let nextRoleId: string | undefined;
+
+    if (dto.roleId !== undefined || dto.role !== undefined) {
+      const role = await this.resolveAssignableRole(dto.roleId, dto.role);
+      this.assertCanAssignRole(actor, role.code);
+      nextRoleCode = role.code;
+      nextRoleId = String(role._id);
     }
 
-    const nextRole = dto.role ?? existing.role;
     const nextStatus = this.resolveStatus(dto.status, dto.isActive);
 
-    await this.guardLastAdmin(existing, nextRole, nextStatus);
+    await this.guardLastAdmin(existing, nextRoleCode, nextStatus);
 
     const passwordHash =
       dto.password !== undefined
@@ -165,7 +162,8 @@ export class AdminUsersController {
       fullName: dto.fullName,
       phone: dto.phone,
       passwordHash,
-      role: dto.role,
+      roleId: nextRoleId,
+      role: nextRoleId ? nextRoleCode : undefined,
       status: nextStatus,
     });
 
@@ -193,17 +191,30 @@ export class AdminUsersController {
     return { ok: true };
   }
 
-  private assertAssignableRole(role: UserRole): void {
-    if (!(ASSIGNABLE_STAFF_ROLES as readonly UserRole[]).includes(role)) {
+  private async resolveAssignableRole(roleId?: string, roleCode?: string) {
+    const role = roleId
+      ? await this.rolesService.findByIdOrFail(roleId)
+      : await this.rolesService.findByCodeOrFail(
+          (roleCode ?? '').toUpperCase(),
+        );
+
+    if (!role.adminPanel) {
       throw new BadRequestException(
-        `role must be one of: ${ASSIGNABLE_STAFF_ROLES.join(', ')}`,
+        'Cannot assign a non-admin-panel role to staff',
       );
     }
+    if (!role.isActive) {
+      throw new BadRequestException('Role is inactive');
+    }
+    if (role.code === UserRole.SHOP_OWNER) {
+      throw new BadRequestException('SHOP_OWNER cannot be assigned via staff API');
+    }
+    return role;
   }
 
   /** Only super-admins may grant the ADMIN role. */
-  private assertCanAssignRole(actor: AuthUser, role: UserRole): void {
-    if (role === UserRole.ADMIN && actor.role !== UserRole.ADMIN) {
+  private assertCanAssignRole(actor: AuthUser, roleCode: string): void {
+    if (roleCode === UserRole.ADMIN && actor.role !== UserRole.ADMIN) {
       throw new ForbiddenException('Only ADMIN can assign the ADMIN role');
     }
   }
@@ -227,8 +238,8 @@ export class AdminUsersController {
   }
 
   private async guardLastAdmin(
-    existing: { role: UserRole; status: UserStatus },
-    nextRole: UserRole,
+    existing: { role: string; status: UserStatus },
+    nextRole: string,
     nextStatus?: UserStatus,
   ): Promise<void> {
     const wasActiveAdmin =
@@ -257,6 +268,7 @@ export class AdminUsersController {
       fullName: json.fullName,
       phone: json.phone,
       role: json.role,
+      roleId: json.roleId ? String(json.roleId) : null,
       status,
       isActive: status === UserStatus.APPROVED,
       branchId: json.branchId ? String(json.branchId) : null,

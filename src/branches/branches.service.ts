@@ -17,6 +17,7 @@ import {
   paginatedResult,
   type PaginatedResult,
 } from '../common/pagination';
+import { RolesService } from '../roles/roles.service';
 import { User, UserDocument } from '../users/schemas/user.schema';
 import {
   AssignBranchManagerDto,
@@ -30,6 +31,7 @@ export class BranchesService {
   constructor(
     @InjectModel(Branch.name) private readonly branchModel: Model<Branch>,
     @InjectModel(User.name) private readonly userModel: Model<User>,
+    private readonly rolesService: RolesService,
   ) {}
 
   async create(dto: CreateBranchDto): Promise<Record<string, unknown>> {
@@ -161,7 +163,11 @@ export class BranchesService {
 
       staff.branchId = branch._id as Types.ObjectId;
       if (staff.role !== UserRole.ADMIN) {
-        staff.role = UserRole.BRANCH_MANAGER;
+        const bmRole = await this.rolesService.findByCodeOrFail(
+          UserRole.BRANCH_MANAGER,
+        );
+        staff.role = bmRole.code as UserRole;
+        staff.roleId = bmRole._id as Types.ObjectId;
       }
       await staff.save();
     } else {
@@ -195,7 +201,9 @@ export class BranchesService {
       user.branchId = undefined;
     }
     if (user.role === UserRole.BRANCH_MANAGER) {
-      user.role = UserRole.STAFF;
+      const staffRole = await this.rolesService.findByCodeOrFail(UserRole.STAFF);
+      user.role = staffRole.code as UserRole;
+      user.roleId = staffRole._id as Types.ObjectId;
     }
     await user.save();
   }

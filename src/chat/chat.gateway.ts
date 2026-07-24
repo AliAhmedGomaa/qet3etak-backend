@@ -24,7 +24,7 @@ import {
 
 interface SocketUser {
   userId: string;
-  role: UserRole;
+  role: UserRole | string;
   shopName?: string;
 }
 
@@ -106,7 +106,7 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection {
       shopId,
       shopName: user.role === UserRole.SHOP_OWNER ? user.shopName : undefined,
       senderId: user.userId,
-      senderRole: user.role,
+      senderRole: user.role as UserRole,
       text,
     });
   }
@@ -120,7 +120,7 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection {
     if (!user) return;
     const shopId = isAdminPanelRole(user.role) ? body?.shopId : user.userId;
     if (!shopId) return;
-    await this.chatService.markRead(shopId, user.role);
+    await this.chatService.markRead(shopId, user.role as UserRole);
   }
 
   /**

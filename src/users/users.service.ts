@@ -17,6 +17,7 @@ import {
   paginatedResult,
   type PaginatedResult,
 } from '../common/pagination';
+import { RolesService } from '../roles/roles.service';
 import { User, UserDocument } from './schemas/user.schema';
 
 export type CreateUserInput = {
@@ -28,6 +29,7 @@ export type CreateUserInput = {
   commercialRegPhotoUrl: string;
   passwordHash: string;
   role?: User['role'];
+  roleId?: string;
   status?: UserStatus;
   rejectionReason?: string;
   branchId?: string;
@@ -50,18 +52,25 @@ export type UpdateStaffInput = {
   fullName?: string;
   phone?: string;
   passwordHash?: string;
-  role?: UserRole;
+  role?: UserRole | string;
+  roleId?: string;
   status?: UserStatus;
 };
 
 @Injectable()
 export class UsersService {
-  constructor(@InjectModel(User.name) private readonly userModel: Model<User>) {}
+  constructor(
+    @InjectModel(User.name) private readonly userModel: Model<User>,
+    private readonly rolesService: RolesService,
+  ) {}
 
-  create(data: CreateUserInput): Promise<UserDocument> {
-    const { branchId, ...rest } = data;
+  async create(data: CreateUserInput): Promise<UserDocument> {
+    const { branchId, roleId, role, ...rest } = data;
+    const resolved = await this.resolveRoleAssignment({ role, roleId });
     return this.userModel.create({
       ...rest,
+      role: resolved.code,
+      roleId: resolved.id,
       ...(branchId && Types.ObjectId.isValid(branchId)
         ? { branchId: new Types.ObjectId(branchId) }
         : {}),
@@ -251,16 +260,27 @@ export class UsersService {
   }
 
   async findStaff(
-    role?: UserRole,
+    role?: string,
     status?: UserStatus,
     page?: number,
     limit?: number,
     q?: string,
+    roleId?: string,
   ): Promise<PaginatedResult<UserDocument>> {
     const p = normalizePagination(page, limit, 20);
-    const filter: Record<string, unknown> = {
-      role: role ? role : { $in: ADMIN_PANEL_ROLES },
-    };
+    const adminCodes = await this.rolesService.getAdminPanelCodes();
+    const codes =
+      adminCodes.length > 0 ? adminCodes : (ADMIN_PANEL_ROLES as string[]);
+
+    const filter: Record<string, unknown> = {};
+    if (roleId && Types.ObjectId.isValid(roleId)) {
+      filter['roleId'] = new Types.ObjectId(roleId);
+    } else if (role) {
+      filter['role'] = role;
+    } else {
+      filter['role'] = { $in: codes };
+    }
+
     if (status) filter['status'] = status;
     if (q?.trim()) {
       const rx = new RegExp(
@@ -285,9 +305,12 @@ export class UsersService {
     id: string,
     opts?: { withPassword?: boolean },
   ): Promise<UserDocument> {
+    const adminCodes = await this.rolesService.getAdminPanelCodes();
+    const codes =
+      adminCodes.length > 0 ? adminCodes : (ADMIN_PANEL_ROLES as string[]);
     let query = this.userModel.findOne({
       _id: id,
-      role: { $in: ADMIN_PANEL_ROLES },
+      role: { $in: codes },
     });
     if (opts?.withPassword) {
       query = query.select('+passwordHash');
@@ -327,7 +350,14 @@ export class UsersService {
 
     if (data.fullName !== undefined) user.fullName = data.fullName.trim();
     if (data.passwordHash !== undefined) user.passwordHash = data.passwordHash;
-    if (data.role !== undefined) user.role = data.role;
+    if (data.roleId !== undefined || data.role !== undefined) {
+      const resolved = await this.resolveRoleAssignment({
+        role: data.role,
+        roleId: data.roleId,
+      });
+      user.role = resolved.code;
+      user.roleId = resolved.id;
+    }
     if (data.status !== undefined) {
       user.status = data.status;
       user.rejectionReason = undefined;
@@ -337,11 +367,53 @@ export class UsersService {
   }
 
   async removeStaff(id: string): Promise<void> {
+    const adminCodes = await this.rolesService.getAdminPanelCodes();
+    const codes =
+      adminCodes.length > 0 ? adminCodes : (ADMIN_PANEL_ROLES as string[]);
     const res = await this.userModel
-      .deleteOne({ _id: id, role: { $in: ADMIN_PANEL_ROLES } })
+      .deleteOne({ _id: id, role: { $in: codes } })
       .exec();
     if (!res.deletedCount) {
       throw new NotFoundException('Staff user not found');
     }
+  }
+
+  /**
+   * Apply a known system role by code (e.g. branch manager assignment).
+   * Syncs both role code and roleId.
+   */
+  async assignSystemRole(
+    user: UserDocument,
+    code: UserRole,
+  ): Promise<UserDocument> {
+    const role = await this.rolesService.findByCodeOrFail(code);
+    user.role = role.code as UserRole;
+    user.roleId = role._id as Types.ObjectId;
+    return user.save();
+  }
+
+  private async resolveRoleAssignment(input: {
+    role?: string;
+    roleId?: string;
+  }): Promise<{ code: string; id: Types.ObjectId }> {
+    if (input.roleId) {
+      if (!Types.ObjectId.isValid(input.roleId)) {
+        throw new BadRequestException('Invalid roleId');
+      }
+      const role = await this.rolesService.findByIdOrFail(input.roleId);
+      if (!role.isActive) {
+        throw new BadRequestException('Role is inactive');
+      }
+      return { code: role.code, id: role._id as Types.ObjectId };
+    }
+    const code = (input.role ?? UserRole.SHOP_OWNER).toString().toUpperCase();
+    const role = await this.rolesService.findByCode(code);
+    if (!role) {
+      throw new BadRequestException(`Unknown role: ${code}`);
+    }
+    if (!role.isActive) {
+      throw new BadRequestException('Role is inactive');
+    }
+    return { code: role.code, id: role._id as Types.ObjectId };
   }
 }

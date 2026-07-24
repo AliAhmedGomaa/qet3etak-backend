@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
+import { RolesModule } from '../roles/roles.module';
 import { User, UserSchema } from '../users/schemas/user.schema';
 import { BranchesController } from './branches.controller';
 import { BranchesService } from './branches.service';
@@ -11,6 +12,7 @@ import { Branch, BranchSchema } from './schemas/branch.schema';
       { name: Branch.name, schema: BranchSchema },
       { name: User.name, schema: UserSchema },
     ]),
+    RolesModule,
   ],
   controllers: [BranchesController],
   providers: [BranchesService],

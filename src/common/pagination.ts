@@ -32,6 +32,24 @@ export class PaginationQueryDto {
   @IsOptional()
   @IsString()
   branchId?: string;
+
+  /** Roles list: include inactive roles when "1"/"true". */
+  @ApiPropertyOptional({
+    example: '1',
+    description: 'Include inactive roles (admin roles list)',
+  })
+  @IsOptional()
+  @IsString()
+  includeInactive?: string;
+
+  /** Roles list: only admin-panel roles when "1"/"true". */
+  @ApiPropertyOptional({
+    example: '1',
+    description: 'Filter to admin-panel roles only',
+  })
+  @IsOptional()
+  @IsString()
+  adminPanelOnly?: string;
 }
 
 /** Pagination + optional status filter (shops / special-requests). */
@@ -52,6 +70,14 @@ export class PaginatedStatusQueryDto extends PaginationQueryDto {
   @IsOptional()
   @IsString()
   role?: string;
+
+  @ApiPropertyOptional({
+    example: '665f1a2b3c4d5e6f7a8b9c0d',
+    description: 'Optional Role document id filter (admin users list)',
+  })
+  @IsOptional()
+  @IsString()
+  roleId?: string;
 }
 
 export interface PaginatedResult<T> {

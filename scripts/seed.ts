@@ -27,6 +27,7 @@ import {
 } from '../src/common/enums/return.enums';
 import { SpecialRequestStatus } from '../src/common/enums/special-request.enums';
 import { UserRole, UserStatus } from '../src/common/enums/user.enums';
+import { SYSTEM_ROLE_SEEDS } from '../src/roles/role.definitions';
 
 function loadEnvFile(): void {
   const envPath = join(process.cwd(), '.env');
@@ -54,6 +55,7 @@ const MONGODB_URI =
 
 const COLLECTIONS = [
   'users',
+  'roles',
   'products',
   'orders',
   'invoices',
@@ -1151,12 +1153,64 @@ async function main(): Promise<void> {
   }
 
   const users = db.collection('users');
+  const rolesCol = db.collection('roles');
   const productsCol = db.collection('products');
   const ordersCol = db.collection('orders');
   const walletsCol = db.collection('wallets');
   const specialCol = db.collection('special_requests');
   const brandsCol = db.collection('brands');
   const categoriesCol = db.collection('categories');
+
+  async function ensureSystemRoles(): Promise<Map<string, Types.ObjectId>> {
+    const byCode = new Map<string, Types.ObjectId>();
+    const now = new Date();
+    for (const seed of SYSTEM_ROLE_SEEDS) {
+      await rolesCol.updateOne(
+        { code: seed.code },
+        {
+          $setOnInsert: {
+            code: seed.code,
+            isSystem: true,
+            createdAt: now,
+          },
+          $set: {
+            name: seed.name,
+            description: seed.description,
+            adminPanel: seed.adminPanel,
+            permissions: seed.permissions,
+            isActive: true,
+            isSystem: true,
+            updatedAt: now,
+          },
+        },
+        { upsert: true },
+      );
+      const found = await rolesCol.findOne({ code: seed.code });
+      if (found?._id) byCode.set(seed.code, found._id as Types.ObjectId);
+    }
+    return byCode;
+  }
+
+  async function migrateUserRoleIds(
+    roleByCode: Map<string, Types.ObjectId>,
+  ): Promise<number> {
+    const missing = await users
+      .find({ $or: [{ roleId: { $exists: false } }, { roleId: null }] })
+      .toArray();
+    let n = 0;
+    for (const u of missing) {
+      const code = (u['role'] as string) || UserRole.SHOP_OWNER;
+      const roleId =
+        roleByCode.get(code) ?? roleByCode.get(UserRole.SHOP_OWNER);
+      if (!roleId) continue;
+      await users.updateOne(
+        { _id: u['_id'] },
+        { $set: { roleId, role: code } },
+      );
+      n += 1;
+    }
+    return n;
+  }
 
   if (RESET) {
     console.log('Resetting collections...');
@@ -1171,6 +1225,10 @@ async function main(): Promise<void> {
       console.log(
         `Database already has ${userCount} users. Skipping full seed.`,
       );
+      console.log('Ensuring system roles + migrating user roleIds...');
+      const roleByCode = await ensureSystemRoles();
+      const migrated = await migrateUserRoleIds(roleByCode);
+      console.log(`  roles ready; migrated ${migrated} users`);
       console.log('Upserting delivery guys (additive)...');
       const deliveryGuysCol = db.collection('delivery_guys');
       const n = await upsertDeliveryGuys(deliveryGuysCol);
@@ -1215,6 +1273,10 @@ async function main(): Promise<void> {
     }
   }
 
+  console.log('Seeding system roles...');
+  const roleByCode = await ensureSystemRoles();
+  console.log(`  ${roleByCode.size} roles`);
+
   console.log('Seeding admin...');
   const adminHash = await bcrypt.hash(ADMIN_PASSWORD, 10);
   const adminId = new Types.ObjectId();
@@ -1230,6 +1292,7 @@ async function main(): Promise<void> {
     commercialRegPhotoUrl: SHOP_IMAGE,
     passwordHash: adminHash,
     role: UserRole.ADMIN,
+    roleId: roleByCode.get(UserRole.ADMIN),
     status: UserStatus.APPROVED,
     createdAt: daysAgo(180),
     updatedAt: daysAgo(1),
@@ -1297,6 +1360,7 @@ async function main(): Promise<void> {
       commercialRegPhotoUrl: SHOP_IMAGE,
       passwordHash: shopHash,
       role: UserRole.SHOP_OWNER,
+      roleId: roleByCode.get(UserRole.SHOP_OWNER),
       status: s.status,
       rejectionReason: s.rejectionReason,
       createdAt: daysAgo(randInt(5, 120)),

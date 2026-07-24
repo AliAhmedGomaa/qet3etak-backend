@@ -2,7 +2,7 @@ import { Types } from 'mongoose';
 import { UserRole } from './enums/user.enums';
 
 export type BranchScopedUser = {
-  role: UserRole;
+  role: UserRole | string;
   branchId?: string | null;
 };
 

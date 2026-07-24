@@ -71,7 +71,7 @@ export class AdminChatController {
     @Param('shopId') shopId: string,
   ) {
     const messages = await this.chatService.getMessages(shopId);
-    await this.chatService.markRead(shopId, user.role);
+    await this.chatService.markRead(shopId, user.role as UserRole);
     return { messages };
   }
 
@@ -86,7 +86,7 @@ export class AdminChatController {
     return this.chatService.sendMessage({
       shopId,
       senderId: user.userId,
-      senderRole: user.role,
+      senderRole: user.role as UserRole,
       text: dto.text,
     });
   }

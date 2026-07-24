@@ -31,8 +31,17 @@ export class User {
   })
   status!: UserStatus;
 
-  @Prop({ type: String, enum: UserRole, default: UserRole.SHOP_OWNER })
-  role!: UserRole;
+  /**
+   * Denormalized role code (synced from Role.code) for JWT/guards compatibility.
+   * System codes: ADMIN, MANAGER, STAFF, BRANCH_MANAGER, SHOP_OWNER.
+   * Custom roles use their own code (e.g. OPS) and are treated like STAFF when adminPanel.
+   */
+  @Prop({ type: String, default: UserRole.SHOP_OWNER, index: true })
+  role!: UserRole | string;
+
+  /** Reference to the Role document. */
+  @Prop({ type: Types.ObjectId, ref: 'Role', index: true })
+  roleId?: Types.ObjectId;
 
   /**
    * Optional branch assignment.
@@ -57,6 +66,7 @@ UserSchema.set('toJSON', {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   transform: (_doc: unknown, ret: any) => {
     ret.id = ret._id;
+    if (ret.roleId) ret.roleId = String(ret.roleId);
     delete ret._id;
     delete ret.__v;
     delete ret.passwordHash;

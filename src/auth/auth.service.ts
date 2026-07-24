@@ -6,8 +6,13 @@ import {
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
-import { UserRole, UserStatus } from '../common/enums/user.enums';
+import {
+  UserRole,
+  UserStatus,
+  isAdminPanelRole,
+} from '../common/enums/user.enums';
 import { absoluteMediaUrl } from '../common/media-url';
+import { RolesService } from '../roles/roles.service';
 import { UserDocument } from '../users/schemas/user.schema';
 import { UsersService } from '../users/users.service';
 import { LoginDto } from './dto/login.dto';
@@ -17,6 +22,7 @@ import { RegisterShopDto } from './dto/register-shop.dto';
 export class AuthService {
   constructor(
     private readonly usersService: UsersService,
+    private readonly rolesService: RolesService,
     private readonly jwtService: JwtService,
   ) {}
 
@@ -84,22 +90,32 @@ export class AuthService {
     return this.toUserView(user);
   }
 
-  private tokenResponse(user: UserDocument): {
+  private async tokenResponse(user: UserDocument): Promise<{
     accessToken: string;
     user: Record<string, unknown>;
-  } {
+  }> {
     const payload = { sub: String(user._id), phone: user.phone };
     const accessToken = this.jwtService.sign(payload);
     return {
       accessToken,
-      user: this.toUserView(user),
+      user: await this.toUserView(user),
     };
   }
 
-  private toUserView(user: UserDocument): Record<string, unknown> {
+  private async toUserView(
+    user: UserDocument,
+  ): Promise<Record<string, unknown>> {
     const json = user.toJSON() as unknown as Record<string, unknown>;
+    const roleDoc = await this.rolesService.resolveForUser(user);
+    const roleCode = (roleDoc?.code ?? user.role ?? UserRole.SHOP_OWNER) as string;
+    const adminPanel =
+      roleDoc?.adminPanel ?? isAdminPanelRole(roleCode);
     return {
       ...json,
+      role: roleCode,
+      roleId: roleDoc ? String(roleDoc._id) : json.roleId ?? null,
+      adminPanel,
+      roleName: roleDoc?.name ?? roleCode,
       commercialRegPhotoUrl: absoluteMediaUrl(
         typeof json.commercialRegPhotoUrl === 'string'
           ? json.commercialRegPhotoUrl

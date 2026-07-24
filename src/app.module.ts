@@ -26,6 +26,8 @@ import { ImportModule } from './import/import.module';
 import { ReturnsModule } from './returns/returns.module';
 import { ReportsModule } from './reports/reports.module';
 import { BranchesModule } from './branches/branches.module';
+import { RolesModule } from './roles/roles.module';
+import { RolesService } from './roles/roles.service';
 
 @Module({
   imports: [
@@ -40,6 +42,7 @@ import { BranchesModule } from './branches/branches.module';
       }),
     }),
     ServeStaticModule.forRoot(...getUploadsStaticRoots()),
+    RolesModule,
     UsersModule,
     AuthModule,
     AdminModule,
@@ -63,13 +66,17 @@ import { BranchesModule } from './branches/branches.module';
   controllers: [HealthController],
 })
 export class AppModule implements OnModuleInit {
-  constructor(private readonly usersService: UsersService) {}
+  constructor(
+    private readonly usersService: UsersService,
+    private readonly rolesService: RolesService,
+  ) {}
 
   async onModuleInit(): Promise<void> {
     const phone = process.env.ADMIN_PHONE ?? '0500000000';
     const existing = await this.usersService.findByPhone(phone);
     if (existing) return;
 
+    const adminRole = await this.rolesService.findByCodeOrFail(UserRole.ADMIN);
     const passwordHash = await bcrypt.hash(
       process.env.ADMIN_PASSWORD ?? 'Admin123!',
       10,
@@ -82,6 +89,7 @@ export class AppModule implements OnModuleInit {
       address: 'Head Office',
       commercialRegPhotoUrl: '/uploads/admin-placeholder.png',
       passwordHash,
+      roleId: String(adminRole._id),
       role: UserRole.ADMIN,
       status: UserStatus.APPROVED,
     });

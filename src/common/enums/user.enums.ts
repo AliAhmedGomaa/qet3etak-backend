@@ -32,15 +32,32 @@ export const UNSCOPED_ADMIN_ROLES: UserRole[] = [
   UserRole.STAFF,
 ];
 
-export function isAdminPanelRole(role: UserRole): boolean {
-  return ADMIN_PANEL_ROLES.includes(role);
+export function isAdminPanelRole(role: string | UserRole | undefined | null): boolean {
+  return !!role && (ADMIN_PANEL_ROLES as string[]).includes(role);
 }
 
-export function isUnscopedAdminRole(role: UserRole): boolean {
-  return UNSCOPED_ADMIN_ROLES.includes(role);
+export function isUnscopedAdminRole(role: string | UserRole | undefined | null): boolean {
+  return !!role && (UNSCOPED_ADMIN_ROLES as string[]).includes(role);
 }
 
-/** Human-readable role definitions for the admin UI. */
+export function isSystemRoleCode(role: string | undefined | null): boolean {
+  return !!role && Object.values(UserRole).includes(role as UserRole);
+}
+
+/**
+ * Effective role for guard checks.
+ * Custom roles with adminPanel are treated as STAFF (panel access without super-admin powers).
+ */
+export function effectiveGuardRole(
+  role: string,
+  adminPanel?: boolean,
+): UserRole | string {
+  if (isSystemRoleCode(role)) return role;
+  if (adminPanel) return UserRole.STAFF;
+  return role;
+}
+
+/** @deprecated Prefer Role collection / GET /admin/roles — kept for transitional references. */
 export const ADMIN_ROLE_DEFINITIONS = [
   {
     role: UserRole.ADMIN,

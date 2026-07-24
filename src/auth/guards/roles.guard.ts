@@ -5,14 +5,22 @@ import {
   Injectable,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import { UserRole, UserStatus } from '../../common/enums/user.enums';
+import {
+  UserRole,
+  UserStatus,
+  effectiveGuardRole,
+} from '../../common/enums/user.enums';
 import { ROLES_KEY } from '../decorators/roles.decorator';
 import { REQUIRE_APPROVED_KEY } from '../decorators/require-approved.decorator';
 
 export type AuthUser = {
   userId: string;
   phone: string;
-  role: UserRole;
+  /** Role code (system or custom). */
+  role: UserRole | string;
+  roleId?: string;
+  /** From Role.adminPanel — custom roles can access admin when true. */
+  adminPanel?: boolean;
   status: UserStatus;
   shopName?: string;
   fullName?: string;
@@ -40,8 +48,17 @@ export class RolesGuard implements CanActivate {
       throw new ForbiddenException('Missing authenticated user');
     }
 
-    if (requiredRoles?.length && !requiredRoles.includes(user.role)) {
-      throw new ForbiddenException('Insufficient role');
+    if (requiredRoles?.length) {
+      const effective = effectiveGuardRole(
+        String(user.role),
+        user.adminPanel,
+      );
+      const allowed =
+        requiredRoles.includes(user.role as UserRole) ||
+        requiredRoles.includes(effective as UserRole);
+      if (!allowed) {
+        throw new ForbiddenException('Insufficient role');
+      }
     }
 
     // Block PENDING / REJECTED / SUSPENDED shop owners from wholesale (and any @RequireApproved) routes
@@ -66,7 +83,9 @@ export class RolesGuard implements CanActivate {
         });
       }
       if (user.status !== UserStatus.APPROVED) {
-        throw new ForbiddenException('Shop is not approved for wholesale access');
+        throw new ForbiddenException(
+          'Shop is not approved for wholesale access',
+        );
       }
     }
 
