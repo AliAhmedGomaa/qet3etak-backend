@@ -18,11 +18,8 @@
     }
   ],
   "functions": {
-    "api/**": {
-      "includeFiles": "dist/assets/uploads/**"
-    },
     "src/main.ts": {
-      "includeFiles": "dist/assets/uploads/**"
+      "includeFiles": "{dist/assets/uploads/**,src/assets/uploads/**}"
     }
   }
 }

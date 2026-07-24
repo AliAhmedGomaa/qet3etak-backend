@@ -7,8 +7,9 @@ import { join } from 'path';
  * Serverless runtimes (Vercel / Lambda) mount the app under `/var/task` as
  * read-only — only `/tmp` is writable — so we detect that and redirect there.
  *
- * Placeholder / seed images are tracked under `src/assets/uploads` and copied
- * into the writable uploads dir on boot (see seedBundledPlaceholders).
+ * Placeholder / seed images are tracked under `src/assets/uploads`, included in
+ * the Vercel function bundle (vercel.json includeFiles + nest-cli assets), and
+ * copied into the writable uploads dir on boot when possible.
  * User uploads on serverless still do not persist across cold starts — use
  * object storage (S3, Blob, etc.) for durable user media.
  */
@@ -44,19 +45,22 @@ export const BUNDLED_UPLOAD_FILES = [
 
 /**
  * Resolve the directory that contains bundled placeholder images.
- * Nest copies `src/assets/**` → `dist/assets/**` (see nest-cli.json).
+ * Checked in order for Nest build output, Vercel function layout, and local dev.
  */
 export function getBundledUploadsDir(): string | null {
   const candidates = [
-    // Compiled: dist/src/common → dist/assets/uploads
-    join(__dirname, '..', '..', 'assets', 'uploads'),
-    // Compiled alternate: dist/common → dist/assets/uploads
-    join(__dirname, '..', 'assets', 'uploads'),
-    // Next to cwd after nest build
+    // Source tree (also shipped via vercel.json includeFiles)
+    join(process.cwd(), 'src', 'assets', 'uploads'),
+    // Nest CLI assets: dist/assets/uploads
     join(process.cwd(), 'dist', 'assets', 'uploads'),
     join(process.cwd(), 'dist', 'src', 'assets', 'uploads'),
-    // Dev / source tree
-    join(process.cwd(), 'src', 'assets', 'uploads'),
+    // Relative to this module (dist/src/common or similar)
+    join(__dirname, '..', '..', 'assets', 'uploads'),
+    join(__dirname, '..', 'assets', 'uploads'),
+    join(__dirname, 'assets', 'uploads'),
+    // Absolute under /var/task (Vercel)
+    join('/var/task', 'src', 'assets', 'uploads'),
+    join('/var/task', 'dist', 'assets', 'uploads'),
   ];
 
   for (const dir of candidates) {
@@ -92,10 +96,19 @@ export function seedBundledPlaceholders(destDir?: string): string {
     return dir;
   }
 
-  const names = new Set<string>([
-    ...BUNDLED_UPLOAD_FILES,
-    ...readdirSync(sourceDir).filter((n) => /\.(png|jpe?g|webp|gif|svg)$/i.test(n)),
-  ]);
+  let names: string[] = [...BUNDLED_UPLOAD_FILES];
+  try {
+    names = [
+      ...new Set([
+        ...names,
+        ...readdirSync(sourceDir).filter((n) =>
+          /\.(png|jpe?g|webp|gif|svg)$/i.test(n),
+        ),
+      ]),
+    ];
+  } catch {
+    // keep BUNDLED_UPLOAD_FILES only
+  }
 
   for (const name of names) {
     const src = join(sourceDir, name);
@@ -116,4 +129,18 @@ export function seedBundledPlaceholders(destDir?: string): string {
 /** Create the uploads folder and seed bundled placeholders. Never throws on import/boot. */
 export function ensureUploadsDir(): string {
   return seedBundledPlaceholders(getUploadsDir());
+}
+
+/**
+ * Static roots for ServeStaticModule: writable uploads first, then bundled
+ * placeholders (so seed images work even if /tmp seeding fails).
+ */
+export function getUploadsStaticRoots(): { rootPath: string; serveRoot: string }[] {
+  const writable = ensureUploadsDir();
+  const bundled = getBundledUploadsDir();
+  const roots = [{ rootPath: writable, serveRoot: '/uploads' }];
+  if (bundled && bundled !== writable) {
+    roots.push({ rootPath: bundled, serveRoot: '/uploads' });
+  }
+  return roots;
 }
