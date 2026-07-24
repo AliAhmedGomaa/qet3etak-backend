@@ -77,6 +77,16 @@ export class Order {
 
   @Prop({ trim: true, default: '' })
   notes!: string;
+
+  @Prop({ type: Types.ObjectId, ref: 'DeliveryGuy', index: true })
+  deliveryGuyId?: Types.ObjectId;
+
+  @Prop({ trim: true, default: '' })
+  deliveryGuyName!: string;
+
+  /** Courier fee for this order (EGP), calculated from the guy’s fee model. */
+  @Prop({ min: 0, default: 0 })
+  deliveryFee!: number;
 }
 
 export const OrderSchema = SchemaFactory.createForClass(Order);

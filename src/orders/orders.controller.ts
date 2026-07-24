@@ -23,7 +23,7 @@ import { Roles } from '../auth/decorators/roles.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import type { AuthUser } from '../auth/guards/roles.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
-import { CheckoutDto, UpdateOrderStatusDto } from './dto/order.dto';
+import { CheckoutDto, AssignOrderDeliveryDto, UpdateOrderStatusDto } from './dto/order.dto';
 import { OrdersService } from './orders.service';
 import { examples } from '../swagger/examples';
 
@@ -102,5 +102,19 @@ export class OrdersController {
   @Roles(UserRole.ADMIN)
   updateStatus(@Param('id') id: string, @Body() dto: UpdateOrderStatusDto) {
     return this.ordersService.updateStatus(id, dto);
+  }
+
+  @Patch('admin/orders/:id/delivery')
+  @ApiTags('Admin — Orders')
+  @ApiOperation({
+    summary: 'Assign a delivery guy and calculate their fee for this order',
+  })
+  @ApiBody({ type: AssignOrderDeliveryDto })
+  @Roles(UserRole.ADMIN)
+  assignDelivery(
+    @Param('id') id: string,
+    @Body() dto: AssignOrderDeliveryDto,
+  ) {
+    return this.ordersService.assignDelivery(id, dto);
   }
 }

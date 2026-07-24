@@ -20,6 +20,7 @@ import { SpecialRequestsModule } from './special-requests/special-requests.modul
 import { PurchasingModule } from './purchasing/purchasing.module';
 import { FinancialsModule } from './financials/financials.module';
 import { ChatModule } from './chat/chat.module';
+import { DeliveryModule } from './delivery/delivery.module';
 
 @Module({
   imports: [
@@ -47,6 +48,7 @@ import { ChatModule } from './chat/chat.module';
     PurchasingModule,
     FinancialsModule,
     ChatModule,
+    DeliveryModule,
   ],
   controllers: [HealthController],
 })

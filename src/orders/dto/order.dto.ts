@@ -52,6 +52,23 @@ export class UpdateOrderStatusDto {
   @IsOptional()
   @IsString()
   note?: string;
+
+  /** Optional: assign / reassign a delivery guy when updating status (e.g. SHIPPED). */
+  @ApiPropertyOptional({ example: '6a5ed4b2f718e30c208e48d0' })
+  @IsOptional()
+  @IsString()
+  deliveryGuyId?: string;
+}
+
+export class AssignOrderDeliveryDto {
+  @ApiProperty({ example: '6a5ed4b2f718e30c208e48d0' })
+  @IsString()
+  deliveryGuyId!: string;
+
+  @ApiPropertyOptional({ example: 'Afternoon route' })
+  @IsOptional()
+  @IsString()
+  note?: string;
 }
 
 export class SetCreditLimitDto {

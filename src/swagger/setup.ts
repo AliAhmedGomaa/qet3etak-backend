@@ -47,6 +47,7 @@ export function setupSwagger(app: INestApplication): void {
     .addTag('Admin — Chat', 'Admin side of shop chat')
     .addTag('Admin — Purchasing', 'Suppliers and purchase orders')
     .addTag('Admin — Financials', 'P&L, expenses, damaged stock')
+    .addTag('Admin — Delivery', 'Delivery guys, fees, and assignment')
     .build();
 
   const document = SwaggerModule.createDocument(app, config, {

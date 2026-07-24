@@ -16,7 +16,13 @@ import { resolveUnitPrice } from '../products/pricing.util';
 import { UsersService } from '../users/users.service';
 import { WalletsService } from '../wallets/wallets.service';
 import { PushService } from '../push/push.service';
-import { CheckoutDto, UpdateOrderStatusDto } from './dto/order.dto';
+import { DeliveryGuysService } from '../delivery/delivery-guys.service';
+import { DeliveryGuyStatus } from '../common/enums/delivery.enums';
+import {
+  AssignOrderDeliveryDto,
+  CheckoutDto,
+  UpdateOrderStatusDto,
+} from './dto/order.dto';
 import { Order, OrderDocument } from './schemas/order.schema';
 
 const STATUS_FLOW: OrderStatus[] = [
@@ -46,6 +52,7 @@ export class OrdersService {
     private readonly walletsService: WalletsService,
     private readonly usersService: UsersService,
     private readonly pushService: PushService,
+    private readonly deliveryGuysService: DeliveryGuysService,
   ) {}
 
   async checkout(shopUserId: string, dto: CheckoutDto): Promise<OrderDocument> {
@@ -169,30 +176,96 @@ export class OrdersService {
     }
     // Allow move to any status in the board (including backwards for ops flexibility)
     // but block skipping delivered from received without preparing/shipped? User asked drag-drop through board — allow any of the 4.
-    if (currentIdx === nextIdx) return order;
+    const statusChanged = currentIdx !== nextIdx;
+    if (statusChanged) {
+      order.status = dto.status;
+      order.statusHistory.push({
+        status: dto.status,
+        at: new Date(),
+        note: dto.note?.trim() || `Status → ${dto.status}`,
+      });
+    }
 
-    order.status = dto.status;
-    order.statusHistory.push({
-      status: dto.status,
-      at: new Date(),
-      note: dto.note?.trim() || `Status → ${dto.status}`,
-    });
+    if (dto.deliveryGuyId) {
+      await this.applyDeliveryAssignment(order, dto.deliveryGuyId, dto.note);
+    }
+
+    if (!statusChanged && !dto.deliveryGuyId) return order;
+
     await order.save();
 
-    const statusLabel: Record<OrderStatus, string> = {
-      [OrderStatus.RECEIVED]: 'تم استلام الطلب',
-      [OrderStatus.PREPARING]: 'جاري التجهيز',
-      [OrderStatus.SHIPPED]: 'تم الشحن',
-      [OrderStatus.DELIVERED]: 'تم التسليم',
-    };
-    await this.pushService.notifyUser(String(order.shopId), {
-      title: `تحديث الطلب ${order.orderNumber}`,
-      body: statusLabel[dto.status],
-      url: `/orders/${order.id}`,
-      tag: `order-${order.id}`,
-    });
+    if (statusChanged) {
+      const statusLabel: Record<OrderStatus, string> = {
+        [OrderStatus.RECEIVED]: 'تم استلام الطلب',
+        [OrderStatus.PREPARING]: 'جاري التجهيز',
+        [OrderStatus.SHIPPED]: 'تم الشحن',
+        [OrderStatus.DELIVERED]: 'تم التسليم',
+      };
+      await this.pushService.notifyUser(String(order.shopId), {
+        title: `تحديث الطلب ${order.orderNumber}`,
+        body: statusLabel[dto.status],
+        url: `/orders/${order.id}`,
+        tag: `order-${order.id}`,
+      });
+    }
+
+    // Count fee toward courier stats once when order reaches DELIVERED.
+    if (
+      statusChanged &&
+      dto.status === OrderStatus.DELIVERED &&
+      order.deliveryGuyId &&
+      order.deliveryFee > 0
+    ) {
+      await this.deliveryGuysService.recordDeliveryStats(
+        String(order.deliveryGuyId),
+        order.deliveryFee,
+      );
+    }
 
     return order;
+  }
+
+  async assignDelivery(
+    orderId: string,
+    dto: AssignOrderDeliveryDto,
+  ): Promise<OrderDocument> {
+    const order = await this.orderModel.findById(orderId).exec();
+    if (!order) throw new NotFoundException('Order not found');
+    await this.applyDeliveryAssignment(order, dto.deliveryGuyId, dto.note);
+    await order.save();
+    return order;
+  }
+
+  private async applyDeliveryAssignment(
+    order: OrderDocument,
+    deliveryGuyId: string,
+    note?: string,
+  ): Promise<void> {
+    if (!Types.ObjectId.isValid(deliveryGuyId)) {
+      throw new BadRequestException('Invalid deliveryGuyId');
+    }
+    const guy = await this.deliveryGuysService.findById(deliveryGuyId);
+    if (guy.status !== DeliveryGuyStatus.ACTIVE) {
+      throw new BadRequestException('Delivery guy is inactive');
+    }
+    const itemCount = (order.items ?? []).reduce(
+      (sum, line) => sum + (line.quantity || 0),
+      0,
+    );
+    const fee = this.deliveryGuysService.calculateFee(guy, {
+      orderTotal: order.total,
+      itemCount,
+    });
+    order.deliveryGuyId = guy._id as Types.ObjectId;
+    order.deliveryGuyName = guy.fullName;
+    order.deliveryFee = fee;
+    if (note?.trim()) {
+      order.statusHistory.push({
+        status: order.status,
+        at: new Date(),
+        note: note.trim(),
+      });
+    }
   }
 
   private async priceItems(items: CheckoutDto['items']) {
