@@ -2,7 +2,8 @@
  * Database seeder — populates MongoDB with realistic demo data.
  *
  * Usage:
- *   npm run seed          # seed only if collections are empty
+ *   npm run seed          # full seed if empty; if DB already has users,
+ *                         # only upserts delivery_guys (idempotent by phone)
  *   npm run seed:reset    # drop app collections and reseed from scratch
  */
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'fs';
@@ -254,10 +255,11 @@ function productImageFor(category: string): string {
 }
 
 async function upsertDeliveryGuys(
-  col: ReturnType<NonNullable<typeof mongoose.connection.db>['collection']>,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  col: any,
 ): Promise<number> {
   const now = new Date();
-  let upserted = 0;
+  let touched = 0;
   for (const guy of DELIVERY_GUYS) {
     const result = await col.updateOne(
       { phone: guy.phone },
@@ -284,11 +286,11 @@ async function upsertDeliveryGuys(
       },
       { upsert: true },
     );
-    if (result.upsertedCount > 0 || result.modifiedCount > 0) upserted++;
+    if (result.upsertedCount > 0 || result.modifiedCount > 0) touched++;
   }
   await col.createIndex({ phone: 1 }, { unique: true });
   await col.createIndex({ status: 1 });
-  return upserted;
+  return touched;
 }
 
 /** Wipe + insert with retries — a live API may bootstrap brands/categories mid-seed. */
@@ -496,8 +498,15 @@ async function main(): Promise<void> {
     const userCount = await users.countDocuments();
     if (userCount > 1) {
       console.log(
-        `Database already has ${userCount} users. Use npm run seed:reset to wipe and reseed.`,
+        `Database already has ${userCount} users. Skipping full seed.`,
       );
+      console.log('Upserting delivery guys (additive)...');
+      const deliveryGuysCol = db.collection('delivery_guys');
+      const n = await upsertDeliveryGuys(deliveryGuysCol);
+      console.log(`  ${n}/${DELIVERY_GUYS.length} delivery guys upserted`);
+      for (const g of DELIVERY_GUYS) {
+        console.log(`    ${g.phone}  ${g.fullName}  (${g.feeModel})`);
+      }
       await mongoose.disconnect();
       return;
     }
@@ -842,6 +851,11 @@ async function main(): Promise<void> {
   await specialCol.insertMany(specialRequests);
   console.log(`  ${specialRequests.length} special requests`);
 
+  console.log('Seeding delivery guys...');
+  const deliveryGuysCol = db.collection('delivery_guys');
+  const deliveryGuysUpserted = await upsertDeliveryGuys(deliveryGuysCol);
+  console.log(`  ${deliveryGuysUpserted}/${DELIVERY_GUYS.length} delivery guys`);
+
   // Unique indexes expected by the app
   await brandsCol.createIndex({ name: 1 }, { unique: true });
   await categoriesCol.createIndex({ name: 1 }, { unique: true });
@@ -871,6 +885,10 @@ async function main(): Promise<void> {
   console.log(`  Shop    → phone: 0501000020      password: ${SHOP_PASSWORD}`);
   console.log(`  Pending → phone: 0502000001      password: ${SHOP_PASSWORD}`);
   console.log(`  Rejected→ phone: 0503000001      password: ${SHOP_PASSWORD}`);
+  console.log('\nDelivery guys:');
+  for (const g of DELIVERY_GUYS) {
+    console.log(`  ${g.phone}  ${g.fullName}  (${g.feeModel})`);
+  }
   console.log('\nSummary:');
   console.log(`  Users:            ${shops.length + 1} (incl. admin)`);
   console.log(`  Brands:           ${brandDocs.length}`);
@@ -879,6 +897,7 @@ async function main(): Promise<void> {
   console.log(`  Orders:           ${orderDocs.length}`);
   console.log(`  Wallets:          ${walletDocs.length}`);
   console.log(`  Special requests: ${specialRequests.length}`);
+  console.log(`  Delivery guys:    ${DELIVERY_GUYS.length}`);
 
   await mongoose.disconnect();
 }

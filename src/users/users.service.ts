@@ -64,10 +64,18 @@ export class UsersService {
     return user;
   }
 
-  async findShopByIdOrFail(id: string): Promise<UserDocument> {
-    const user = await this.userModel
-      .findOne({ _id: id, role: UserRole.SHOP_OWNER })
-      .exec();
+  async findShopByIdOrFail(
+    id: string,
+    opts?: { withPassword?: boolean },
+  ): Promise<UserDocument> {
+    let query = this.userModel.findOne({
+      _id: id,
+      role: UserRole.SHOP_OWNER,
+    });
+    if (opts?.withPassword) {
+      query = query.select('+passwordHash');
+    }
+    const user = await query.exec();
     if (!user) throw new NotFoundException('Shop not found');
     return user;
   }
@@ -130,7 +138,9 @@ export class UsersService {
     id: string,
     data: UpdateShopInput,
   ): Promise<UserDocument> {
-    const user = await this.findShopByIdOrFail(id);
+    const user = await this.findShopByIdOrFail(id, {
+      withPassword: data.passwordHash !== undefined,
+    });
 
     if (data.phone && data.phone.trim() !== user.phone) {
       const phone = data.phone.trim();

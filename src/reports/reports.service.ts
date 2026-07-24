@@ -173,7 +173,7 @@ export class ReportsService {
               _id: null,
               orderCount: { $sum: 1 },
               revenue: { $sum: '$total' },
-              unitsSold: { $sum: { $sum: '$items.quantity' } },
+              unitsSold: { $sum: itemsQtySumExpr() },
             },
           },
         ])
@@ -283,47 +283,47 @@ export class ReportsService {
     const [facet] = await this.orderModel
       .aggregate([
         { $match: match },
-        {
-          $group: {
-            _id: '$shopId',
-            shopName: { $first: '$shopName' },
-            orderCount: { $sum: 1 },
-            revenue: { $sum: '$total' },
-            unitsSold: { $sum: { $sum: '$items.quantity' } },
+          {
+            $group: {
+              _id: '$shopId',
+              shopName: { $first: '$shopName' },
+              orderCount: { $sum: 1 },
+              revenue: { $sum: '$total' },
+              unitsSold: { $sum: itemsQtySumExpr() },
+            },
           },
-        },
-        { $sort: { revenue: -1 } },
-        {
-          $facet: {
-            items: [
-              { $skip: skip },
-              { $limit: l },
-              {
-                $project: {
-                  _id: 0,
-                  shopId: { $toString: '$_id' },
-                  shopName: 1,
-                  orderCount: 1,
-                  revenue: { $round: ['$revenue', 2] },
-                  unitsSold: 1,
+          { $sort: { revenue: -1 } },
+          {
+            $facet: {
+              items: [
+                { $skip: skip },
+                { $limit: l },
+                {
+                  $project: {
+                    _id: 0,
+                    shopId: { $toString: '$_id' },
+                    shopName: 1,
+                    orderCount: 1,
+                    revenue: { $round: ['$revenue', 2] },
+                    unitsSold: 1,
+                  },
                 },
-              },
-            ],
-            total: [{ $count: 'count' }],
-            summary: [
-              {
-                $group: {
-                  _id: null,
-                  shopCount: { $sum: 1 },
-                  orderCount: { $sum: '$orderCount' },
-                  revenue: { $sum: '$revenue' },
+              ],
+              total: [{ $count: 'count' }],
+              summary: [
+                {
+                  $group: {
+                    _id: null,
+                    shopCount: { $sum: 1 },
+                    orderCount: { $sum: '$orderCount' },
+                    revenue: { $sum: '$revenue' },
+                  },
                 },
-              },
-            ],
+              ],
+            },
           },
-        },
-      ])
-      .exec();
+        ])
+        .exec();
 
     const items = (facet?.items ?? []) as Array<{
       shopId: string;
@@ -350,7 +350,7 @@ export class ReportsService {
               shopName: { $first: '$shopName' },
               orderCount: { $sum: 1 },
               revenue: { $sum: '$total' },
-              unitsSold: { $sum: { $sum: '$items.quantity' } },
+              unitsSold: { $sum: itemsQtySumExpr() },
             },
           },
           { $sort: { revenue: -1 } },
@@ -956,7 +956,7 @@ export class ReportsService {
               _id: null,
               orderCount: { $sum: 1 },
               revenue: { $sum: '$total' },
-              unitsBought: { $sum: { $sum: '$items.quantity' } },
+              unitsBought: { $sum: itemsQtySumExpr() },
             },
           },
         ])
@@ -1035,6 +1035,164 @@ export class ReportsService {
       })),
       topProducts,
     };
+  }
+
+  // ─── Returns ──────────────────────────────────────────────────────────
+
+  async getReturns(
+    from?: string,
+    to?: string,
+    format: 'json' | 'csv' = 'json',
+  ) {
+    const range = parseRange(from, to);
+    const match = createdAtMatch(range.start, range.end);
+
+    const [totals, byStatus, byRefund, recent] = await Promise.all([
+      this.returnModel
+        .aggregate([
+          { $match: match },
+          {
+            $group: {
+              _id: null,
+              returnCount: { $sum: 1 },
+              refundAmount: { $sum: '$refundAmount' },
+              unitsReturned: { $sum: itemsQtySumExpr() },
+            },
+          },
+        ])
+        .exec(),
+      this.returnModel
+        .aggregate([
+          { $match: match },
+          {
+            $group: {
+              _id: '$status',
+              returnCount: { $sum: 1 },
+              refundAmount: { $sum: '$refundAmount' },
+            },
+          },
+          { $sort: { returnCount: -1 } },
+        ])
+        .exec(),
+      this.returnModel
+        .aggregate([
+          {
+            $match: {
+              ...match,
+              status: 'APPROVED',
+              refundMethod: { $exists: true, $ne: null },
+            },
+          },
+          {
+            $group: {
+              _id: '$refundMethod',
+              returnCount: { $sum: 1 },
+              refundAmount: { $sum: '$refundAmount' },
+            },
+          },
+        ])
+        .exec(),
+      this.returnModel
+        .aggregate([
+          { $match: match },
+          { $sort: { createdAt: -1 } },
+          { $limit: 100 },
+          {
+            $project: {
+              _id: 0,
+              id: { $toString: '$_id' },
+              shopName: 1,
+              orderNumber: 1,
+              status: 1,
+              refundAmount: 1,
+              refundMethod: 1,
+              reason: 1,
+              createdAt: 1,
+            },
+          },
+        ])
+        .exec(),
+    ]);
+
+    const payload = {
+      range: { from: range.from, to: range.to },
+      summary: {
+        returnCount: totals[0]?.returnCount ?? 0,
+        refundAmount: round(totals[0]?.refundAmount ?? 0),
+        unitsReturned: totals[0]?.unitsReturned ?? 0,
+      },
+      byStatus: (
+        byStatus as Array<{
+          _id: string;
+          returnCount: number;
+          refundAmount: number;
+        }>
+      ).map((r) => ({
+        status: r._id,
+        returnCount: r.returnCount,
+        refundAmount: round(r.refundAmount),
+      })),
+      byRefundMethod: (
+        byRefund as Array<{
+          _id: string;
+          returnCount: number;
+          refundAmount: number;
+        }>
+      ).map((r) => ({
+        refundMethod: r._id,
+        returnCount: r.returnCount,
+        refundAmount: round(r.refundAmount),
+      })),
+      recent: (
+        recent as Array<{
+          id: string;
+          shopName: string;
+          orderNumber: string;
+          status: string;
+          refundAmount: number;
+          refundMethod?: string;
+          reason: string;
+          createdAt: Date;
+        }>
+      ).map((r) => ({
+        ...r,
+        refundAmount: round(r.refundAmount),
+        createdAt:
+          r.createdAt instanceof Date
+            ? r.createdAt.toISOString()
+            : String(r.createdAt ?? ''),
+      })),
+    };
+
+    if (format === 'csv') {
+      return {
+        csv: toCsv(
+          [
+            'id',
+            'shopName',
+            'orderNumber',
+            'status',
+            'refundAmount',
+            'refundMethod',
+            'reason',
+            'createdAt',
+          ],
+          payload.recent.map((r) => [
+            r.id,
+            r.shopName,
+            r.orderNumber,
+            r.status,
+            r.refundAmount,
+            r.refundMethod ?? '',
+            r.reason,
+            r.createdAt,
+          ]),
+        ),
+        filename: `returns-${range.from.slice(0, 10)}_${range.to.slice(0, 10)}.csv`,
+      };
+    }
+
+    return payload;
   }
 }
 
