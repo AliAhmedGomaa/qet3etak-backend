@@ -7,7 +7,6 @@ import {
   IsString,
   Matches,
   MinLength,
-  ValidateIf,
 } from 'class-validator';
 import { UserRole, UserStatus } from '../../common/enums/user.enums';
 
@@ -41,7 +40,7 @@ export class CreateAdminUserDto {
     example: '665f1a2b3c4d5e6f7a8b9c0d',
     description: 'Preferred: Role document id',
   })
-  @ValidateIf((o: CreateAdminUserDto) => !o.role)
+  @IsOptional()
   @IsMongoId()
   roleId?: string;
 
@@ -50,7 +49,7 @@ export class CreateAdminUserDto {
     example: UserRole.STAFF,
     description: 'Role code (used when roleId omitted). Still supported.',
   })
-  @ValidateIf((o: CreateAdminUserDto) => !o.roleId)
+  @IsOptional()
   @IsString()
   @MinLength(2)
   role?: string;
