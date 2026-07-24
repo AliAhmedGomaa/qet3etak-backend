@@ -1,6 +1,14 @@
 import { INestApplication } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 
+/**
+ * Serverless hosts (Vercel / Lambda) cannot serve swagger-ui-dist via
+ * express.static from node_modules — CSS/JS return 404 under `/docs/*`.
+ * Load the matching UI build from a CDN instead.
+ */
+const SWAGGER_UI_CDN =
+  'https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.32.8';
+
 /** Mount OpenAPI UI at `/docs` and JSON at `/docs-json`. */
 export function setupSwagger(app: INestApplication): void {
   const config = new DocumentBuilder()
@@ -54,5 +62,14 @@ export function setupSwagger(app: INestApplication): void {
       operationsSorter: 'alpha',
     },
     customSiteTitle: 'Qet3etak API Docs',
+    customfavIcon: `${SWAGGER_UI_CDN}/favicon-32x32.png`,
+    customCssUrl: `${SWAGGER_UI_CDN}/swagger-ui.css`,
+    customJs: [
+      `${SWAGGER_UI_CDN}/swagger-ui-bundle.js`,
+      `${SWAGGER_UI_CDN}/swagger-ui-standalone-preset.js`,
+    ],
+    // CDN + Nest HTML can leave path wrappers slightly misaligned.
+    customCss:
+      '.swagger-ui .opblock .opblock-summary-path-description-wrapper { align-items: center; display: flex; flex-wrap: wrap; gap: 0 10px; padding: 0 10px; width: 100%; }',
   });
 }

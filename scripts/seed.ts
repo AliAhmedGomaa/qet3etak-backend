@@ -47,6 +47,11 @@ const COLLECTIONS = [
   'push_subscriptions',
   'brands',
   'categories',
+  'suppliers',
+  'purchase_orders',
+  'expenses',
+  'chat_conversations',
+  'chat_messages',
 ] as const;
 
 const CITIES = [
@@ -134,6 +139,27 @@ const CATEGORY_IMAGES: Record<string, string> = {
 
 function productImageFor(category: string): string {
   return CATEGORY_IMAGES[category] ?? PRODUCT_IMAGE;
+}
+
+/** Wipe + insert with retries — a live API may bootstrap brands/categories mid-seed. */
+async function replaceDocs(
+  col: { collectionName: string; deleteMany: (f: object) => Promise<unknown>; insertMany: (docs: object[]) => Promise<unknown> },
+  docs: object[],
+): Promise<void> {
+  for (let attempt = 1; attempt <= 4; attempt++) {
+    await col.deleteMany({});
+    if (!docs.length) return;
+    try {
+      await col.insertMany(docs);
+      return;
+    } catch (err: unknown) {
+      const code = (err as { code?: number })?.code;
+      if (code !== 11000 || attempt === 4) throw err;
+      console.warn(
+        `  ${col.collectionName}: duplicate key race (attempt ${attempt}), retrying...`,
+      );
+    }
+  }
 }
 
 type ProductDoc = {
@@ -306,8 +332,9 @@ async function main(): Promise<void> {
   if (RESET) {
     console.log('Resetting collections...');
     for (const name of COLLECTIONS) {
-      const exists = await db.listCollections({ name }).hasNext();
-      if (exists) await db.dropCollection(name);
+      // deleteMany keeps indexes and avoids races with a running API
+      // that may recreate bootstrap docs between drop and insert.
+      await db.collection(name).deleteMany({});
     }
   } else {
     const userCount = await users.countDocuments();
@@ -323,6 +350,8 @@ async function main(): Promise<void> {
   console.log('Seeding admin...');
   const adminHash = await bcrypt.hash(ADMIN_PASSWORD, 10);
   const adminId = new Types.ObjectId();
+  // App bootstrap may recreate this admin while the seed is running.
+  await users.deleteMany({ phone: ADMIN_PHONE });
   await users.insertOne({
     _id: adminId,
     fullName: 'Platform Admin',
@@ -424,7 +453,7 @@ async function main(): Promise<void> {
     createdAt: daysAgo(100),
     updatedAt: daysAgo(1),
   }));
-  await brandsCol.insertMany(brandDocs);
+  await replaceDocs(brandsCol, brandDocs);
   console.log(`  ${brandDocs.length} brands`);
 
   console.log('Seeding categories...');
@@ -437,12 +466,12 @@ async function main(): Promise<void> {
     createdAt: daysAgo(100),
     updatedAt: daysAgo(1),
   }));
-  await categoriesCol.insertMany(categoryDocs);
+  await replaceDocs(categoriesCol, categoryDocs);
   console.log(`  ${categoryDocs.length} categories`);
 
   console.log('Seeding products...');
   const products = buildProducts();
-  await productsCol.insertMany(products);
+  await replaceDocs(productsCol, products);
   console.log(`  ${products.length} products`);
 
   type WalletTx = {
