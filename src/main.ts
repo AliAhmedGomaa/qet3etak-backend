@@ -1,6 +1,7 @@
 import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
+import { buildCorsOptions } from './common/cors';
 import { setupSwagger } from './swagger/setup';
 import { ensureUploadsDir } from './common/uploads';
 
@@ -8,10 +9,7 @@ async function bootstrap() {
   ensureUploadsDir();
 
   const app = await NestFactory.create(AppModule);
-  app.enableCors({
-    origin: true,
-    credentials: true,
-  });
+  app.enableCors(buildCorsOptions());
   // Needed behind Render / Cloudflare reverse proxies (correct HTTPS + IPs).
   app.getHttpAdapter().getInstance().set('trust proxy', 1);
   app.useGlobalPipes(

@@ -12,6 +12,7 @@ import {
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
 import { UserRole } from '../common/enums/user.enums';
+import { buildCorsOptions } from '../common/cors';
 import { UsersService } from '../users/users.service';
 import {
   ADMIN_ROOM,
@@ -30,7 +31,7 @@ interface SocketUser {
 type ChatSocket = Socket & { data: { user?: SocketUser } };
 
 @WebSocketGateway({
-  cors: { origin: true, credentials: true },
+  cors: buildCorsOptions(),
 })
 export class ChatGateway implements OnGatewayInit, OnGatewayConnection {
   private readonly logger = new Logger(ChatGateway.name);
