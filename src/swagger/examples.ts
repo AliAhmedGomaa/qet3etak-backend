@@ -402,7 +402,7 @@ export const SwaggerExamples = {
 
   // ── Admin shops ─────────────────────────────────────────────────────────
   updateShopStatusApprove: {
-    summary: 'Approve shop',
+    summary: 'Approve / reactivate shop',
     value: { status: 'APPROVED' },
   },
   updateShopStatusReject: {
@@ -411,6 +411,10 @@ export const SwaggerExamples = {
       status: 'REJECTED',
       reason: 'Commercial registration photo is unclear',
     },
+  },
+  updateShopStatusSuspend: {
+    summary: 'Suspend shop',
+    value: { status: 'SUSPENDED' },
   },
   shopListItem: {
     summary: 'Shop row',
@@ -507,6 +511,15 @@ export const SwaggerExamples = {
     value: {
       code: 'PENDING_VERIFICATION',
       message: 'Account is pending management review',
+      statusCode: 403,
+    },
+  },
+  forbiddenSuspended: {
+    summary: 'Shop suspended',
+    value: {
+      code: 'SUSPENDED',
+      message:
+        'Account suspended / الحساب موقوف — تواصل مع الإدارة لإعادة التفعيل',
       statusCode: 403,
     },
   },

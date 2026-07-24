@@ -23,6 +23,15 @@ export class PaginationQueryDto {
   @IsOptional()
   @IsString()
   q?: string;
+
+  /** Optional branch filter (ADMIN only; branch managers are auto-scoped). */
+  @ApiPropertyOptional({
+    example: '664f1a2b3c4d5e6f7a8b9c0d',
+    description: 'Filter by branch id (ADMIN). Ignored for BRANCH_MANAGER.',
+  })
+  @IsOptional()
+  @IsString()
+  branchId?: string;
 }
 
 /** Pagination + optional status filter (shops / special-requests). */
@@ -35,6 +44,14 @@ export class PaginatedStatusQueryDto extends PaginationQueryDto {
   @IsOptional()
   @IsString()
   status?: string;
+
+  @ApiPropertyOptional({
+    example: 'STAFF',
+    description: 'Optional role filter (admin users list)',
+  })
+  @IsOptional()
+  @IsString()
+  role?: string;
 }
 
 export interface PaginatedResult<T> {

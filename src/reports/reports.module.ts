@@ -10,6 +10,7 @@ import {
   ReturnRequest,
   ReturnRequestSchema,
 } from '../returns/schemas/return-request.schema';
+import { User, UserSchema } from '../users/schemas/user.schema';
 import { Wallet, WalletSchema } from '../wallets/schemas/wallet.schema';
 import { ReportsController } from './reports.controller';
 import { ShopReportsController } from './reports.shop.controller';
@@ -23,6 +24,7 @@ import { ReportsService } from './reports.service';
       { name: Product.name, schema: ProductSchema },
       { name: DeliveryGuy.name, schema: DeliveryGuySchema },
       { name: ReturnRequest.name, schema: ReturnRequestSchema },
+      { name: User.name, schema: UserSchema },
     ]),
   ],
   controllers: [ReportsController, ShopReportsController],

@@ -35,6 +35,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       status: user.status,
       shopName: user.shopName,
       fullName: user.fullName,
+      branchId: user.branchId ? String(user.branchId) : undefined,
     };
   }
 }

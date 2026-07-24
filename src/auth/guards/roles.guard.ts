@@ -16,6 +16,8 @@ export type AuthUser = {
   status: UserStatus;
   shopName?: string;
   fullName?: string;
+  /** Set for BRANCH_MANAGER (and optionally other staff). */
+  branchId?: string;
 };
 
 @Injectable()
@@ -42,7 +44,7 @@ export class RolesGuard implements CanActivate {
       throw new ForbiddenException('Insufficient role');
     }
 
-    // Block PENDING / REJECTED shop owners from wholesale (and any @RequireApproved) routes
+    // Block PENDING / REJECTED / SUSPENDED shop owners from wholesale (and any @RequireApproved) routes
     if (requireApproved && user.role === UserRole.SHOP_OWNER) {
       if (user.status === UserStatus.PENDING_VERIFICATION) {
         throw new ForbiddenException({
@@ -54,6 +56,13 @@ export class RolesGuard implements CanActivate {
         throw new ForbiddenException({
           code: 'REJECTED',
           message: 'Account registration was rejected',
+        });
+      }
+      if (user.status === UserStatus.SUSPENDED) {
+        throw new ForbiddenException({
+          code: 'SUSPENDED',
+          message:
+            'Account suspended / الحساب موقوف — تواصل مع الإدارة لإعادة التفعيل',
         });
       }
       if (user.status !== UserStatus.APPROVED) {

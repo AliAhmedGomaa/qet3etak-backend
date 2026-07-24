@@ -6,10 +6,10 @@ import {
   PaymentMethod,
   WalletTxType,
 } from '../common/enums/order.enums';
+import { withBranchFilter } from '../common/branch-scope';
 import {
   normalizePagination,
   paginatedResult,
-  type PaginatedResult,
 } from '../common/pagination';
 import { DeliveryGuy } from '../delivery/schemas/delivery-guy.schema';
 import { Order } from '../orders/schemas/order.schema';
@@ -17,8 +17,10 @@ import { Product } from '../products/schemas/product.schema';
 import {
   ReturnRequest,
 } from '../returns/schemas/return-request.schema';
+import { User } from '../users/schemas/user.schema';
 import { Wallet } from '../wallets/schemas/wallet.schema';
 import { toCsv } from './csv.util';
+import { UserRole } from '../common/enums/user.enums';
 
 function parseRange(from?: string, to?: string): {
   start: Date;
@@ -47,6 +49,14 @@ function createdAtMatch(start: Date, end: Date) {
   return { createdAt: { $gte: start, $lte: end } };
 }
 
+function orderMatch(
+  start: Date,
+  end: Date,
+  branchScope?: string | null,
+): Record<string, unknown> {
+  return withBranchFilter(createdAtMatch(start, end), branchScope ?? null);
+}
+
 /** Sum item quantities without unwinding (avoids double-count in $group). */
 function itemsQtySumExpr() {
   return {
@@ -68,13 +78,40 @@ export class ReportsService {
     private readonly deliveryGuyModel: Model<DeliveryGuy>,
     @InjectModel(ReturnRequest.name)
     private readonly returnModel: Model<ReturnRequest>,
+    @InjectModel(User.name) private readonly userModel: Model<User>,
   ) {}
+
+  private async shopIdsForBranch(
+    branchScope?: string | null,
+  ): Promise<Types.ObjectId[] | null> {
+    if (branchScope === null || branchScope === undefined) return null;
+    if (!branchScope || !Types.ObjectId.isValid(branchScope)) return [];
+    const shops = await this.userModel
+      .find({
+        role: UserRole.SHOP_OWNER,
+        branchId: new Types.ObjectId(branchScope),
+      })
+      .select('_id')
+      .exec();
+    return shops.map((s) => s._id as Types.ObjectId);
+  }
 
   // ─── Summary dashboard KPIs ───────────────────────────────────────────
 
-  async getSummary(from?: string, to?: string) {
+  async getSummary(
+    from?: string,
+    to?: string,
+    branchScope?: string | null,
+  ) {
     const range = parseRange(from, to);
-    const match = createdAtMatch(range.start, range.end);
+    const match = orderMatch(range.start, range.end, branchScope);
+    const shopIds = await this.shopIdsForBranch(branchScope);
+    const walletMatch =
+      shopIds === null
+        ? {}
+        : shopIds.length
+          ? { shopId: { $in: shopIds } }
+          : { _id: { $in: [] } };
 
     const [orderAgg, deliveredAgg, walletAgg, lowStock, deliveryAgg] =
       await Promise.all([
@@ -110,6 +147,7 @@ export class ReportsService {
           .exec(),
         this.walletModel
           .aggregate([
+            { $match: walletMatch },
             {
               $group: {
                 _id: null,
@@ -160,9 +198,14 @@ export class ReportsService {
 
   // ─── Sales / orders ───────────────────────────────────────────────────
 
-  async getSales(from?: string, to?: string, format: 'json' | 'csv' = 'json') {
+  async getSales(
+    from?: string,
+    to?: string,
+    format: 'json' | 'csv' = 'json',
+    branchScope?: string | null,
+  ) {
     const range = parseRange(from, to);
-    const match = createdAtMatch(range.start, range.end);
+    const match = orderMatch(range.start, range.end, branchScope);
 
     const [totals, byStatus, byPayment, byDay] = await Promise.all([
       this.orderModel
@@ -275,9 +318,10 @@ export class ReportsService {
     page?: number,
     limit?: number,
     format: 'json' | 'csv' = 'json',
+    branchScope?: string | null,
   ) {
     const range = parseRange(from, to);
-    const match = createdAtMatch(range.start, range.end);
+    const match = orderMatch(range.start, range.end, branchScope);
     const { page: p, limit: l, skip } = normalizePagination(page, limit, 20);
 
     const [facet] = await this.orderModel
@@ -391,9 +435,10 @@ export class ReportsService {
     page?: number,
     limit?: number,
     format: 'json' | 'csv' = 'json',
+    branchScope?: string | null,
   ) {
     const range = parseRange(from, to);
-    const match = createdAtMatch(range.start, range.end);
+    const match = orderMatch(range.start, range.end, branchScope);
     const { page: p, limit: l, skip } = normalizePagination(page, limit, 20);
 
     const [facet] = await this.orderModel
@@ -494,12 +539,25 @@ export class ReportsService {
 
   // ─── Credit / wallet ──────────────────────────────────────────────────
 
-  async getCredit(from?: string, to?: string, format: 'json' | 'csv' = 'json') {
+  async getCredit(
+    from?: string,
+    to?: string,
+    format: 'json' | 'csv' = 'json',
+    branchScope?: string | null,
+  ) {
     const range = parseRange(from, to);
+    const shopIds = await this.shopIdsForBranch(branchScope);
+    const walletMatch =
+      shopIds === null
+        ? {}
+        : shopIds.length
+          ? { shopId: { $in: shopIds } }
+          : { _id: { $in: [] } };
 
     const [balances, movements] = await Promise.all([
       this.walletModel
         .aggregate([
+          { $match: walletMatch },
           {
             $lookup: {
               from: 'users',
@@ -541,6 +599,7 @@ export class ReportsService {
         .exec(),
       this.walletModel
         .aggregate([
+          { $match: walletMatch },
           { $unwind: '$transactions' },
           {
             $match: {
@@ -644,10 +703,11 @@ export class ReportsService {
     from?: string,
     to?: string,
     format: 'json' | 'csv' = 'json',
+    branchScope?: string | null,
   ) {
     const range = parseRange(from, to);
     const match = {
-      ...createdAtMatch(range.start, range.end),
+      ...orderMatch(range.start, range.end, branchScope),
       deliveryGuyId: { $exists: true, $ne: null },
     };
 
@@ -944,7 +1004,7 @@ export class ReportsService {
     const shopObjectId = new Types.ObjectId(shopId);
     const match = {
       shopId: shopObjectId,
-      ...createdAtMatch(range.start, range.end),
+      ...orderMatch(range.start, range.end),
     };
 
     const [totals, byStatus, byPayment, topProducts] = await Promise.all([
@@ -1043,9 +1103,10 @@ export class ReportsService {
     from?: string,
     to?: string,
     format: 'json' | 'csv' = 'json',
+    branchScope?: string | null,
   ) {
     const range = parseRange(from, to);
-    const match = createdAtMatch(range.start, range.end);
+    const match = orderMatch(range.start, range.end, branchScope);
 
     const [totals, byStatus, byRefund, recent] = await Promise.all([
       this.returnModel

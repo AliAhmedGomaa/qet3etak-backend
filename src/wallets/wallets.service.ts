@@ -201,22 +201,33 @@ export class WalletsService {
   async listShopWallets(
     page?: number,
     limit?: number,
+    branchScope?: string | null,
+    shopIds?: string[],
   ): Promise<
     PaginatedResult<
       Record<string, unknown> & { availableCredit: number; utilization: number }
     >
   > {
     const p = normalizePagination(page, limit, 20);
+    const filter: Record<string, unknown> = {};
+    if (branchScope !== null && branchScope !== undefined) {
+      if (!branchScope || !shopIds?.length) {
+        return paginatedResult([], 0, p.page, p.limit);
+      }
+      filter['shopId'] = {
+        $in: shopIds.map((id) => new Types.ObjectId(id)),
+      };
+    }
     const [wallets, total] = await Promise.all([
       this.walletModel
-        .find()
-        .populate('shopId', 'shopName fullName phone status city')
+        .find(filter)
+        .populate('shopId', 'shopName fullName phone status city branchId')
         .sort({ updatedAt: -1 })
         .skip(p.skip)
         .limit(p.limit)
         .select('-transactions')
         .exec(),
-      this.walletModel.countDocuments().exec(),
+      this.walletModel.countDocuments(filter).exec(),
     ]);
 
     const items = wallets.map((w) => {

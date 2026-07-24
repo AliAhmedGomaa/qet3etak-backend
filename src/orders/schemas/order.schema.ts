@@ -54,6 +54,10 @@ export class Order {
   @Prop({ type: Types.ObjectId, ref: 'User', required: true, index: true })
   shopId!: Types.ObjectId;
 
+  /** Denormalized from the shop at checkout for branch-scoped reports. */
+  @Prop({ type: Types.ObjectId, ref: 'Branch', index: true })
+  branchId?: Types.ObjectId;
+
   @Prop({ required: true })
   shopName!: string;
 

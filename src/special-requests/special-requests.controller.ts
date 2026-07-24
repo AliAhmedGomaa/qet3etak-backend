@@ -28,6 +28,7 @@ import {
 } from '../common/pagination';
 import { imageUploadOptions } from '../common/multer-image';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { AdminOnly } from '../auth/decorators/admin-only.decorator';
 import { RequireApproved } from '../auth/decorators/require-approved.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -115,7 +116,7 @@ export class SpecialRequestsController {
     description: 'Paginated special requests',
     schema: { example: examples('paginatedEmpty').paginatedEmpty.value },
   })
-  @Roles(UserRole.ADMIN)
+  @AdminOnly()
   list(@Query() query: PaginatedStatusQueryDto) {
     if (
       query.status &&
@@ -144,7 +145,7 @@ export class SpecialRequestsController {
     description: 'Updated special request',
     schema: { example: examples('specialRequest').specialRequest.value },
   })
-  @Roles(UserRole.ADMIN)
+  @AdminOnly()
   quote(@Param('id') id: string, @Body() dto: QuoteSpecialRequestDto) {
     return this.requestsService.quote(id, dto);
   }
@@ -156,7 +157,7 @@ export class SpecialRequestsController {
     description: 'Updated special request',
     schema: { example: examples('specialRequest').specialRequest.value },
   })
-  @Roles(UserRole.ADMIN)
+  @AdminOnly()
   fulfill(@Param('id') id: string) {
     return this.requestsService.fulfill(id);
   }

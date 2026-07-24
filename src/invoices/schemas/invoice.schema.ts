@@ -70,6 +70,10 @@ export class Invoice {
   @Prop({ type: Types.ObjectId, ref: 'User', required: true, index: true })
   shopId!: Types.ObjectId;
 
+  /** Denormalized from the order / shop for branch scoping. */
+  @Prop({ type: Types.ObjectId, ref: 'Branch', index: true })
+  branchId?: Types.ObjectId;
+
   @Prop({ required: true })
   shopName!: string;
 

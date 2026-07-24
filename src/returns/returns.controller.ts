@@ -23,11 +23,13 @@ import {
   PaginationQueryDto,
 } from '../common/pagination';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { AdminOnly } from '../auth/decorators/admin-only.decorator';
 import { RequireApproved } from '../auth/decorators/require-approved.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import type { AuthUser } from '../auth/guards/roles.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
+import { effectiveBranchScope } from '../common/branch-scope';
 import {
   ApproveReturnDto,
   CreateReturnRequestDto,
@@ -95,8 +97,11 @@ export class ReturnsController {
     summary: 'List all return requests (filter by status, search)',
   })
   @ApiOkResponse({ description: 'Paginated return requests' })
-  @Roles(UserRole.ADMIN)
-  list(@Query() query: PaginatedStatusQueryDto) {
+  @AdminOnly()
+  list(
+    @CurrentUser() user: AuthUser,
+    @Query() query: PaginatedStatusQueryDto,
+  ) {
     if (
       query.status &&
       !Object.values(ReturnRequestStatus).includes(
@@ -105,19 +110,32 @@ export class ReturnsController {
     ) {
       throw new BadRequestException('Invalid status filter');
     }
+    const scope = effectiveBranchScope(user, query.branchId);
     return this.returnsService.listAll(
       query.status as ReturnRequestStatus | undefined,
       query.page,
       query.limit,
       query.q,
+      scope,
     );
+  }
+
+  @Get('admin/returns/pending-count')
+  @ApiTags('Admin — Returns')
+  @ApiOperation({
+    summary: 'Count of PENDING return requests (nav badge)',
+  })
+  @ApiOkResponse({ description: '{ count: number }' })
+  @AdminOnly()
+  pendingCount() {
+    return this.returnsService.pendingCount();
   }
 
   @Get('admin/returns/:id')
   @ApiTags('Admin — Returns')
   @ApiOperation({ summary: 'Get a return request (admin)' })
   @ApiOkResponse({ description: 'Return request detail' })
-  @Roles(UserRole.ADMIN)
+  @AdminOnly()
   get(@Param('id') id: string) {
     return this.returnsService.getById(id);
   }
@@ -131,7 +149,7 @@ export class ReturnsController {
   })
   @ApiBody({ type: ApproveReturnDto })
   @ApiOkResponse({ description: 'Approved return request' })
-  @Roles(UserRole.ADMIN)
+  @AdminOnly()
   approve(
     @CurrentUser() user: AuthUser,
     @Param('id') id: string,
@@ -145,7 +163,7 @@ export class ReturnsController {
   @ApiOperation({ summary: 'Reject a return request' })
   @ApiBody({ type: RejectReturnDto })
   @ApiOkResponse({ description: 'Rejected return request' })
-  @Roles(UserRole.ADMIN)
+  @AdminOnly()
   reject(
     @CurrentUser() user: AuthUser,
     @Param('id') id: string,

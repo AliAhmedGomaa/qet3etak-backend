@@ -8,6 +8,7 @@ import {
   paginatedResult,
   type PaginatedResult,
 } from '../common/pagination';
+import { withBranchFilter } from '../common/branch-scope';
 import { ProductsService } from '../products/products.service';
 import { Order } from '../orders/schemas/order.schema';
 import { CreateExpenseDto, DamagedStockDto } from './dto/expense.dto';
@@ -42,7 +43,11 @@ export class FinancialsService {
     private readonly productsService: ProductsService,
   ) {}
 
-  async getPnl(startDate?: string, endDate?: string): Promise<PnlReport> {
+  async getPnl(
+    startDate?: string,
+    endDate?: string,
+    branchScope?: string | null,
+  ): Promise<PnlReport> {
     const start = startDate ? new Date(startDate) : new Date(0);
     const end = endDate ? new Date(endDate) : new Date();
     // Include the whole end day when only a date (no time) is provided.
@@ -50,10 +55,15 @@ export class FinancialsService {
       end.setHours(23, 59, 59, 999);
     }
 
-    const orderMatch = {
-      status: { $in: COMPLETED_STATUSES },
-      createdAt: { $gte: start, $lte: end },
-    };
+    const orderMatch = withBranchFilter(
+      {
+        status: { $in: COMPLETED_STATUSES },
+        createdAt: { $gte: start, $lte: end },
+      },
+      branchScope ?? null,
+    );
+
+    const scoped = branchScope !== null && branchScope !== undefined;
 
     const [revenueAgg, cogsAgg, expenseAgg] = await Promise.all([
       this.orderModel
@@ -97,13 +107,16 @@ export class FinancialsService {
           },
         ])
         .exec(),
-      this.expenseModel
-        .aggregate([
-          { $match: { date: { $gte: start, $lte: end } } },
-          { $group: { _id: '$category', amount: { $sum: '$amount' } } },
-          { $sort: { amount: -1 } },
-        ])
-        .exec(),
+      // HQ expenses stay global; branch-scoped P&L omits them.
+      scoped
+        ? Promise.resolve([])
+        : this.expenseModel
+            .aggregate([
+              { $match: { date: { $gte: start, $lte: end } } },
+              { $group: { _id: '$category', amount: { $sum: '$amount' } } },
+              { $sort: { amount: -1 } },
+            ])
+            .exec(),
     ]);
 
     const totalRevenue = round(revenueAgg[0]?.revenue ?? 0);

@@ -3,8 +3,11 @@
  *
  * Usage:
  *   npm run seed          # full seed if empty; if DB already has users,
- *                         # only upserts delivery_guys (idempotent by phone)
+ *                         # upserts delivery_guys (by phone), backfills
+ *                         # missing invoices (by orderId), and upserts
+ *                         # sample return_requests (by [SEED] reason key)
  *   npm run seed:reset    # drop app collections and reseed from scratch
+ *                         # (do NOT run against shared/production Atlas)
  */
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'fs';
 import { join } from 'path';
@@ -14,8 +17,14 @@ import {
   DeliveryFeeModel,
   DeliveryGuyStatus,
 } from '../src/common/enums/delivery.enums';
+import { BranchStatus } from '../src/common/enums/branch.enums';
+import { InvoiceStatus } from '../src/common/enums/invoice.enums';
 import { OrderStatus, PaymentMethod, WalletTxType } from '../src/common/enums/order.enums';
 import { QualityGrade } from '../src/common/enums/product.enums';
+import {
+  ReturnRefundMethod,
+  ReturnRequestStatus,
+} from '../src/common/enums/return.enums';
 import { SpecialRequestStatus } from '../src/common/enums/special-request.enums';
 import { UserRole, UserStatus } from '../src/common/enums/user.enums';
 
@@ -47,6 +56,7 @@ const COLLECTIONS = [
   'users',
   'products',
   'orders',
+  'invoices',
   'wallets',
   'special_requests',
   'push_subscriptions',
@@ -58,7 +68,68 @@ const COLLECTIONS = [
   'chat_conversations',
   'chat_messages',
   'delivery_guys',
+  'return_requests',
 ] as const;
+
+/** Marker in reason — idempotent upsert key for seeded return requests. */
+const RETURN_SEED_PREFIX = '[SEED]';
+
+type SeedReturnScenario = {
+  key: string;
+  status: ReturnRequestStatus;
+  /** Prefer CREDIT orders when true, COD when false, either when undefined. */
+  preferCredit?: boolean;
+  /** Return fewer than full qty on first line when possible. */
+  partial: boolean;
+  reason: string;
+  adminNote?: string;
+};
+
+const RETURN_SEED_SCENARIOS: SeedReturnScenario[] = [
+  {
+    key: 'pending-partial',
+    status: ReturnRequestStatus.PENDING,
+    preferCredit: true,
+    partial: true,
+    reason: `${RETURN_SEED_PREFIX}pending-partial القطعة تالفة جزئياً`,
+  },
+  {
+    key: 'pending-full',
+    status: ReturnRequestStatus.PENDING,
+    preferCredit: false,
+    partial: false,
+    reason: `${RETURN_SEED_PREFIX}pending-full غير مطابقة للمواصفات`,
+  },
+  {
+    key: 'pending-multi',
+    status: ReturnRequestStatus.PENDING,
+    partial: true,
+    reason: `${RETURN_SEED_PREFIX}pending-multi كمية زائدة في الشحنة`,
+  },
+  {
+    key: 'approved-credit',
+    status: ReturnRequestStatus.APPROVED,
+    preferCredit: true,
+    partial: true,
+    reason: `${RETURN_SEED_PREFIX}approved-credit شاشة بها خدوش`,
+    adminNote: 'تم الاستلام وإعادة التخزين (بيانات تجريبية)',
+  },
+  {
+    key: 'approved-cod',
+    status: ReturnRequestStatus.APPROVED,
+    preferCredit: false,
+    partial: false,
+    reason: `${RETURN_SEED_PREFIX}approved-cod بطارية ضعيفة`,
+    adminNote: 'موافقة تجريبية — COD بدون تعديل محفظة',
+  },
+  {
+    key: 'rejected',
+    status: ReturnRequestStatus.REJECTED,
+    partial: false,
+    reason: `${RETURN_SEED_PREFIX}rejected خارج فترة القبول`,
+    adminNote: 'مرفوض تجريبياً — خارج نافذة الإرجاع',
+  },
+];
 
 /** Egyptian-style couriers — upserted by phone (safe to re-run). */
 const DELIVERY_GUYS: Array<{
@@ -293,6 +364,606 @@ async function upsertDeliveryGuys(
   return touched;
 }
 
+const SAMPLE_BRANCHES = [
+  {
+    code: 'CAI-DT',
+    name: 'فرع وسط القاهرة',
+    city: 'Cairo',
+    address: '12 Tahrir St, Downtown',
+    phone: '01001112233',
+    notes: 'Seed sample branch',
+  },
+  {
+    code: 'GIZA-01',
+    name: 'فرع الجيزة',
+    city: 'Giza',
+    address: '45 Haram St',
+    phone: '01004445566',
+    notes: 'Seed sample branch',
+  },
+];
+
+async function upsertBranches(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  col: any,
+): Promise<number> {
+  const now = new Date();
+  let touched = 0;
+  for (const b of SAMPLE_BRANCHES) {
+    const result = await col.updateOne(
+      { code: b.code },
+      {
+        $set: {
+          name: b.name,
+          code: b.code,
+          city: b.city,
+          address: b.address,
+          phone: b.phone,
+          notes: b.notes,
+          status: BranchStatus.ACTIVE,
+          updatedAt: now,
+        },
+        $setOnInsert: {
+          createdAt: now,
+        },
+      },
+      { upsert: true },
+    );
+    if (result.upsertedCount > 0 || result.modifiedCount > 0) touched++;
+  }
+  await col.createIndex({ code: 1 }, { unique: true });
+  await col.createIndex({ status: 1 });
+  return touched;
+}
+
+/** Mirrors InvoicesService.sellerFromConfig() for the seed script. */
+function sellerFromEnv(): {
+  name: string;
+  phone: string;
+  city: string;
+  address: string;
+  taxId: string;
+} {
+  return {
+    name:
+      process.env.INVOICE_SELLER_NAME?.trim() || 'قطع غيار — Qet3etak',
+    phone: process.env.INVOICE_SELLER_PHONE?.trim() || '',
+    city: process.env.INVOICE_SELLER_CITY?.trim() || '',
+    address: process.env.INVOICE_SELLER_ADDRESS?.trim() || '',
+    taxId: process.env.INVOICE_SELLER_TAX_ID?.trim() || '',
+  };
+}
+
+type InvoiceBackfillResult = {
+  created: number;
+  skipped: number;
+  samples: string[];
+};
+
+/**
+ * Idempotent: one invoice per orderId (mirrors InvoicesService.issueFromOrder).
+ * Safe to re-run — never wipes the invoices collection.
+ */
+async function backfillInvoices(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  db: any,
+): Promise<InvoiceBackfillResult> {
+  const ordersCol = db.collection('orders');
+  const invoicesCol = db.collection('invoices');
+  const usersCol = db.collection('users');
+
+  await invoicesCol.createIndex({ invoiceNumber: 1 }, { unique: true });
+  await invoicesCol.createIndex({ orderId: 1 }, { unique: true });
+  await invoicesCol.createIndex({ shopId: 1, issuedAt: -1 });
+
+  const orders = await ordersCol
+    .find({})
+    .project({
+      _id: 1,
+      orderNumber: 1,
+      shopId: 1,
+      shopName: 1,
+      paymentMethod: 1,
+      items: 1,
+      subtotal: 1,
+      total: 1,
+      notes: 1,
+      createdAt: 1,
+    })
+    .toArray();
+
+  const existing = await invoicesCol
+    .find({}, { projection: { orderId: 1 } })
+    .toArray();
+  const invoicedOrderIds = new Set(
+    existing.map((doc: { orderId: Types.ObjectId }) => String(doc.orderId)),
+  );
+
+  const shopIdStrings = [
+    ...new Set(
+      orders
+        .map((o: { shopId?: Types.ObjectId }) =>
+          o.shopId ? String(o.shopId) : '',
+        )
+        .filter((id: string): id is string => id.length > 0),
+    ),
+  ];
+  const shopObjectIds = shopIdStrings.map((id: string) => new Types.ObjectId(id));
+
+  const shops = shopObjectIds.length
+    ? await usersCol
+        .find({ _id: { $in: shopObjectIds } })
+        .project({
+          shopName: 1,
+          phone: 1,
+          city: 1,
+          address: 1,
+        })
+        .toArray()
+    : [];
+  const shopById = new Map(
+    shops.map((s: { _id: Types.ObjectId }) => [String(s._id), s] as const),
+  );
+
+  const seller = sellerFromEnv();
+  /** In-memory day → next sequence to avoid N+1 reads while seeding. */
+  const seqByDay = new Map<string, number>();
+
+  async function allocateInvoiceNumber(day: string): Promise<string> {
+    const prefix = `INV-${day}-`;
+    if (!seqByDay.has(day)) {
+      const latest = await invoicesCol.findOne(
+        { invoiceNumber: new RegExp(`^${prefix}`) },
+        { sort: { invoiceNumber: -1 }, projection: { invoiceNumber: 1 } },
+      );
+      let seq = 1;
+      if (latest?.invoiceNumber) {
+        const tail = String(latest.invoiceNumber).slice(prefix.length);
+        const n = parseInt(tail, 10);
+        if (!Number.isNaN(n)) seq = n + 1;
+      }
+      seqByDay.set(day, seq);
+    }
+    const seq = seqByDay.get(day)!;
+    seqByDay.set(day, seq + 1);
+    return `${prefix}${String(seq).padStart(4, '0')}`;
+  }
+
+  let created = 0;
+  let skipped = 0;
+  const samples: string[] = [];
+
+  for (const order of orders) {
+    if (invoicedOrderIds.has(String(order._id))) {
+      skipped++;
+      continue;
+    }
+
+    const shop = shopById.get(String(order.shopId)) as
+      | {
+          shopName?: string;
+          phone?: string;
+          city?: string;
+          address?: string;
+        }
+      | undefined;
+
+    const issuedAt = order.createdAt
+      ? new Date(order.createdAt)
+      : new Date();
+    const day = issuedAt.toISOString().slice(0, 10).replace(/-/g, '');
+    const invoiceNumber = await allocateInvoiceNumber(day);
+
+    const items = Array.isArray(order.items)
+      ? order.items.map(
+          (line: {
+            productId?: Types.ObjectId;
+            title?: string;
+            sku?: string;
+            quantity?: number;
+            unitPrice?: number;
+            lineTotal?: number;
+          }) => ({
+            productId: line.productId,
+            title: line.title || 'Item',
+            sku: line.sku || '',
+            quantity: line.quantity ?? 1,
+            unitPrice: line.unitPrice ?? 0,
+            lineTotal: line.lineTotal ?? 0,
+          }),
+        )
+      : [];
+
+    const now = new Date();
+    try {
+      await invoicesCol.insertOne({
+        invoiceNumber,
+        orderId: order._id,
+        orderNumber: order.orderNumber,
+        shopId: order.shopId,
+        shopName: order.shopName || shop?.shopName || '',
+        seller,
+        buyer: {
+          name: shop?.shopName || order.shopName || '',
+          phone: shop?.phone || '',
+          city: shop?.city || '',
+          address: shop?.address || '',
+          taxId: '',
+        },
+        items,
+        subtotal: order.subtotal ?? order.total ?? 0,
+        total: order.total ?? 0,
+        paymentMethod: order.paymentMethod,
+        status: InvoiceStatus.ISSUED,
+        issuedAt,
+        notes: typeof order.notes === 'string' ? order.notes.trim() : '',
+        createdAt: now,
+        updatedAt: now,
+      });
+      created++;
+      invoicedOrderIds.add(String(order._id));
+      if (samples.length < 8) samples.push(invoiceNumber);
+    } catch (err: unknown) {
+      const code =
+        err && typeof err === 'object' && 'code' in err
+          ? (err as { code?: number }).code
+          : undefined;
+      // Duplicate orderId / invoiceNumber — treat as already present.
+      if (code === 11000) {
+        skipped++;
+        continue;
+      }
+      throw err;
+    }
+  }
+
+  return { created, skipped, samples };
+}
+
+type OrderForReturn = {
+  _id: Types.ObjectId;
+  orderNumber: string;
+  shopId: Types.ObjectId;
+  shopName?: string;
+  paymentMethod: PaymentMethod;
+  status: OrderStatus;
+  items: Array<{
+    productId: Types.ObjectId;
+    title?: string;
+    sku?: string;
+    quantity: number;
+    unitPrice: number;
+    lineTotal?: number;
+  }>;
+  statusHistory?: Array<{ status: string; at: Date; note?: string }>;
+};
+
+type ReturnSeedResult = {
+  upserted: number;
+  promotedOrders: number;
+  byStatus: Record<string, number>;
+};
+
+/**
+ * Ensure enough DELIVERED orders exist for sample returns (minimal status updates).
+ */
+async function ensureDeliveredOrdersForReturns(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  ordersCol: any,
+  needed: number,
+): Promise<{ orders: OrderForReturn[]; promoted: number }> {
+  const project = {
+    _id: 1,
+    orderNumber: 1,
+    shopId: 1,
+    shopName: 1,
+    paymentMethod: 1,
+    status: 1,
+    items: 1,
+    statusHistory: 1,
+  };
+
+  let delivered = (await ordersCol
+    .find({
+      status: OrderStatus.DELIVERED,
+      'items.0': { $exists: true },
+    })
+    .project(project)
+    .sort({ updatedAt: -1 })
+    .limit(Math.max(needed * 2, 20))
+    .toArray()) as OrderForReturn[];
+
+  let promoted = 0;
+  if (delivered.length < needed) {
+    const candidates = (await ordersCol
+      .find({
+        status: { $ne: OrderStatus.DELIVERED },
+        'items.0': { $exists: true },
+      })
+      .project(project)
+      .sort({ createdAt: 1 })
+      .limit(needed - delivered.length)
+      .toArray()) as OrderForReturn[];
+
+    const now = new Date();
+    for (const order of candidates) {
+      const history = Array.isArray(order.statusHistory)
+        ? [...order.statusHistory]
+        : [];
+      const hasDelivered = history.some(
+        (h) => h.status === OrderStatus.DELIVERED,
+      );
+      if (!hasDelivered) {
+        history.push({
+          status: OrderStatus.DELIVERED,
+          at: now,
+          note: 'Status → DELIVERED (seed for returns)',
+        });
+      }
+      await ordersCol.updateOne(
+        { _id: order._id },
+        {
+          $set: {
+            status: OrderStatus.DELIVERED,
+            statusHistory: history,
+            updatedAt: now,
+          },
+        },
+      );
+      order.status = OrderStatus.DELIVERED;
+      order.statusHistory = history;
+      delivered.push(order);
+      promoted++;
+    }
+  }
+
+  return { orders: delivered, promoted };
+}
+
+function buildSeedReturnItems(
+  order: OrderForReturn,
+  partial: boolean,
+): Array<{
+  productId: Types.ObjectId;
+  title: string;
+  sku: string;
+  quantity: number;
+  unitPrice: number;
+  lineTotal: number;
+}> {
+  const lines = (order.items || []).filter(
+    (line) => line?.productId && line.quantity > 0,
+  );
+  if (!lines.length) return [];
+
+  if (partial) {
+    const first = lines[0]!;
+    const qty =
+      first.quantity > 1 ? Math.max(1, Math.floor(first.quantity / 2)) : 1;
+    const unitPrice = first.unitPrice;
+    return [
+      {
+        productId: first.productId,
+        title: first.title || 'Item',
+        sku: first.sku || '',
+        quantity: qty,
+        unitPrice,
+        lineTotal: Number((unitPrice * qty).toFixed(2)),
+      },
+    ];
+  }
+
+  // Full return of first line only keeps sample sizes modest; multi-item
+  // partial scenarios already cover partial-item returns.
+  if (lines.length >= 2 && partial === false) {
+    return lines.slice(0, 2).map((line) => {
+      const qty = line.quantity;
+      const unitPrice = line.unitPrice;
+      return {
+        productId: line.productId,
+        title: line.title || 'Item',
+        sku: line.sku || '',
+        quantity: qty,
+        unitPrice,
+        lineTotal: Number((unitPrice * qty).toFixed(2)),
+      };
+    });
+  }
+
+  return lines.map((line) => {
+    const qty = line.quantity;
+    const unitPrice = line.unitPrice;
+    return {
+      productId: line.productId,
+      title: line.title || 'Item',
+      sku: line.sku || '',
+      quantity: qty,
+      unitPrice,
+      lineTotal: Number((unitPrice * qty).toFixed(2)),
+    };
+  });
+}
+
+/**
+ * Idempotent sample return requests (match by exact [SEED]… reason).
+ * Promotes a few orders to DELIVERED when needed. Does not restock/wallet
+ * for APPROVED rows — those are historical demo snapshots only.
+ */
+async function upsertReturnRequests(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  db: any,
+  adminId?: Types.ObjectId,
+): Promise<ReturnSeedResult> {
+  const ordersCol = db.collection('orders');
+  const returnsCol = db.collection('return_requests');
+  const usersCol = db.collection('users');
+
+  await returnsCol.createIndex({ shopId: 1, createdAt: -1 });
+  await returnsCol.createIndex({ orderId: 1 });
+  await returnsCol.createIndex({ status: 1, createdAt: -1 });
+  await returnsCol.createIndex({ reason: 1 });
+
+  let resolvedAdminId = adminId;
+  if (!resolvedAdminId) {
+    const admin = await usersCol.findOne(
+      { role: UserRole.ADMIN },
+      { projection: { _id: 1 } },
+    );
+    resolvedAdminId = admin?._id as Types.ObjectId | undefined;
+  }
+
+  const { orders, promoted } = await ensureDeliveredOrdersForReturns(
+    ordersCol,
+    RETURN_SEED_SCENARIOS.length,
+  );
+
+  if (!orders.length) {
+    console.warn('  no orders available to attach return requests');
+    return { upserted: 0, promotedOrders: promoted, byStatus: {} };
+  }
+
+  const usedOrderIds = new Set<string>();
+  const existingSeed = await returnsCol
+    .find({ reason: { $regex: `^${RETURN_SEED_PREFIX.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}` } })
+    .project({ reason: 1, orderId: 1 })
+    .toArray();
+  const existingByReason = new Map(
+    existingSeed.map(
+      (doc: { reason: string; orderId: Types.ObjectId }) =>
+        [doc.reason, doc] as const,
+    ),
+  );
+  for (const doc of existingSeed) {
+    if (doc.orderId) usedOrderIds.add(String(doc.orderId));
+  }
+
+  function pickOrder(scenario: SeedReturnScenario): OrderForReturn | null {
+    const existing = existingByReason.get(scenario.reason) as
+      | { orderId: Types.ObjectId }
+      | undefined;
+    if (existing?.orderId) {
+      const kept = orders.find(
+        (o) => String(o._id) === String(existing.orderId),
+      );
+      if (kept) return kept;
+    }
+
+    const prefer = scenario.preferCredit;
+    const ranked = [...orders].sort((a, b) => {
+      const aItems = a.items?.length ?? 0;
+      const bItems = b.items?.length ?? 0;
+      if (scenario.partial) {
+        const aPartial = a.items?.some((i) => i.quantity > 1) ? 1 : 0;
+        const bPartial = b.items?.some((i) => i.quantity > 1) ? 1 : 0;
+        if (bPartial !== aPartial) return bPartial - aPartial;
+      }
+      return bItems - aItems;
+    });
+
+    for (const order of ranked) {
+      const id = String(order._id);
+      if (usedOrderIds.has(id)) continue;
+      if (prefer === true && order.paymentMethod !== PaymentMethod.CREDIT) {
+        continue;
+      }
+      if (
+        prefer === false &&
+        order.paymentMethod !== PaymentMethod.CASH_ON_DELIVERY
+      ) {
+        continue;
+      }
+      return order;
+    }
+
+    // Fallback: any unused delivered order
+    for (const order of ranked) {
+      if (!usedOrderIds.has(String(order._id))) return order;
+    }
+    return ranked[0] ?? null;
+  }
+
+  let upserted = 0;
+  const byStatus: Record<string, number> = {};
+  const now = new Date();
+
+  for (const scenario of RETURN_SEED_SCENARIOS) {
+    const order = pickOrder(scenario);
+    if (!order) continue;
+
+    const items = buildSeedReturnItems(order, scenario.partial);
+    if (!items.length) continue;
+
+    usedOrderIds.add(String(order._id));
+    const refundAmount = Number(
+      items.reduce((sum, line) => sum + line.lineTotal, 0).toFixed(2),
+    );
+
+    let refundMethod: ReturnRefundMethod | undefined;
+    const reviewedAt =
+      scenario.status === ReturnRequestStatus.PENDING
+        ? undefined
+        : daysAgo(randInt(1, 10));
+
+    if (scenario.status === ReturnRequestStatus.APPROVED) {
+      refundMethod =
+        order.paymentMethod === PaymentMethod.CREDIT
+          ? ReturnRefundMethod.WALLET_CREDIT
+          : ReturnRefundMethod.NONE;
+    } else if (scenario.status === ReturnRequestStatus.REJECTED) {
+      refundMethod = ReturnRefundMethod.NONE;
+    }
+
+    const $set: Record<string, unknown> = {
+      shopId: order.shopId,
+      shopName: order.shopName || '',
+      orderId: order._id,
+      orderNumber: order.orderNumber,
+      paymentMethod: order.paymentMethod,
+      items,
+      refundAmount,
+      reason: scenario.reason,
+      status: scenario.status,
+      adminNote: scenario.adminNote ?? '',
+      updatedAt: now,
+    };
+
+    const $unset: Record<string, string> = {};
+
+    if (refundMethod !== undefined) {
+      $set['refundMethod'] = refundMethod;
+    } else {
+      $unset['refundMethod'] = '';
+    }
+
+    if (reviewedAt) {
+      $set['reviewedAt'] = reviewedAt;
+      if (resolvedAdminId) $set['reviewedBy'] = resolvedAdminId;
+    } else {
+      $unset['reviewedAt'] = '';
+      $unset['reviewedBy'] = '';
+    }
+
+    const update: Record<string, unknown> = {
+      $set,
+      $setOnInsert: {
+        createdAt: daysAgo(randInt(2, 20)),
+      },
+    };
+    if (Object.keys($unset).length) update['$unset'] = $unset;
+
+    const result = await returnsCol.updateOne(
+      { reason: scenario.reason },
+      update,
+      { upsert: true },
+    );
+
+    if (result.upsertedCount > 0 || result.modifiedCount > 0) upserted++;
+    byStatus[scenario.status] = (byStatus[scenario.status] ?? 0) + 1;
+  }
+
+  return { upserted, promotedOrders: promoted, byStatus };
+}
+
 /** Wipe + insert with retries — a live API may bootstrap brands/categories mid-seed. */
 async function replaceDocs(
   col: { collectionName: string; deleteMany: (f: object) => Promise<unknown>; insertMany: (docs: object[]) => Promise<unknown> },
@@ -507,6 +1178,38 @@ async function main(): Promise<void> {
       for (const g of DELIVERY_GUYS) {
         console.log(`    ${g.phone}  ${g.fullName}  (${g.feeModel})`);
       }
+
+      console.log('Upserting sample branches (additive)...');
+      const branchesCol = db.collection('branches');
+      const bn = await upsertBranches(branchesCol);
+      console.log(`  ${bn}/${SAMPLE_BRANCHES.length} branches upserted`);
+      for (const b of SAMPLE_BRANCHES) {
+        console.log(`    ${b.code}  ${b.name}`);
+      }
+
+      console.log('Backfilling invoices for orders without one...');
+      const inv = await backfillInvoices(db);
+      console.log(
+        `  invoices: ${inv.created} created, ${inv.skipped} skipped (already present)`,
+      );
+      if (inv.samples.length) {
+        console.log(`  sample invoice numbers: ${inv.samples.join(', ')}`);
+      }
+
+      console.log('Upserting sample return requests (additive)...');
+      const ret = await upsertReturnRequests(db);
+      console.log(
+        `  returns: ${ret.upserted} upserted` +
+          (ret.promotedOrders
+            ? ` (${ret.promotedOrders} orders promoted to DELIVERED)`
+            : ''),
+      );
+      console.log(
+        `  by status: ${Object.entries(ret.byStatus)
+          .map(([s, n]) => `${s}=${n}`)
+          .join(', ') || 'none'}`,
+      );
+
       await mongoose.disconnect();
       return;
     }
@@ -565,6 +1268,14 @@ async function main(): Promise<void> {
       shopName: `Rejected Shop ${i}`,
       status: UserStatus.REJECTED,
       rejectionReason: 'Incomplete commercial registration documents',
+    });
+  }
+  for (let i = 1; i <= 5; i++) {
+    shopDefs.push({
+      phone: `0504${String(i).padStart(6, '0')}`,
+      fullName: `Suspended Owner ${i}`,
+      shopName: `Suspended Shop ${i}`,
+      status: UserStatus.SUSPENDED,
     });
   }
 
@@ -755,6 +1466,15 @@ async function main(): Promise<void> {
   await ordersCol.insertMany(orderDocs);
   console.log(`  ${orderDocs.length} orders`);
 
+  console.log('Seeding invoices for orders...');
+  const invSeed = await backfillInvoices(db);
+  console.log(
+    `  invoices: ${invSeed.created} created, ${invSeed.skipped} skipped`,
+  );
+  if (invSeed.samples.length) {
+    console.log(`  sample invoice numbers: ${invSeed.samples.join(', ')}`);
+  }
+
   console.log('Updating wallet debts from credit orders...');
   let creditApplied = 0;
   for (const order of orderDocs) {
@@ -856,6 +1576,25 @@ async function main(): Promise<void> {
   const deliveryGuysUpserted = await upsertDeliveryGuys(deliveryGuysCol);
   console.log(`  ${deliveryGuysUpserted}/${DELIVERY_GUYS.length} delivery guys`);
 
+  console.log('Seeding branches...');
+  const branchesCol = db.collection('branches');
+  const branchesUpserted = await upsertBranches(branchesCol);
+  console.log(`  ${branchesUpserted}/${SAMPLE_BRANCHES.length} branches`);
+
+  console.log('Seeding return requests...');
+  const retSeed = await upsertReturnRequests(db, adminId);
+  console.log(
+    `  returns: ${retSeed.upserted} upserted` +
+      (retSeed.promotedOrders
+        ? ` (${retSeed.promotedOrders} orders → DELIVERED)`
+        : ''),
+  );
+  console.log(
+    `  by status: ${Object.entries(retSeed.byStatus)
+      .map(([s, n]) => `${s}=${n}`)
+      .join(', ') || 'none'}`,
+  );
+
   // Unique indexes expected by the app
   await brandsCol.createIndex({ name: 1 }, { unique: true });
   await categoriesCol.createIndex({ name: 1 }, { unique: true });
@@ -878,6 +1617,8 @@ async function main(): Promise<void> {
   await ordersCol.createIndex({ orderNumber: 1 }, { unique: true });
   await walletsCol.createIndex({ shopId: 1 }, { unique: true });
 
+  const invoiceCount = await db.collection('invoices').countDocuments();
+
   console.log('\nSeed complete!\n');
   console.log('Test accounts:');
   console.log(`  Admin   → phone: ${ADMIN_PHONE}  password: ${ADMIN_PASSWORD}`);
@@ -895,9 +1636,15 @@ async function main(): Promise<void> {
   console.log(`  Categories:       ${categoryDocs.length}`);
   console.log(`  Products:         ${products.length}`);
   console.log(`  Orders:           ${orderDocs.length}`);
+  console.log(`  Invoices:         ${invoiceCount}`);
   console.log(`  Wallets:          ${walletDocs.length}`);
   console.log(`  Special requests: ${specialRequests.length}`);
   console.log(`  Delivery guys:    ${DELIVERY_GUYS.length}`);
+  console.log(
+    `  Return requests:  ${retSeed.upserted} (${Object.entries(retSeed.byStatus)
+      .map(([s, n]) => `${s}=${n}`)
+      .join(', ')})`,
+  );
 
   await mongoose.disconnect();
 }

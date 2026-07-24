@@ -67,6 +67,14 @@ export class CreateAdminShopDto {
   @IsString()
   @MinLength(3)
   rejectionReason?: string;
+
+  @ApiPropertyOptional({
+    example: '664f1a2b3c4d5e6f7a8b9c0d',
+    description: 'Optional branch assignment (null/omit = HQ / unassigned)',
+  })
+  @IsOptional()
+  @IsString()
+  branchId?: string;
 }
 
 export class UpdateAdminShopDto extends PartialType(CreateAdminShopDto) {

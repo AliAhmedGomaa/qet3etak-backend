@@ -18,11 +18,13 @@ import {
 import { UserRole } from '../common/enums/user.enums';
 import { PaginationQueryDto } from '../common/pagination';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { AdminOnly } from '../auth/decorators/admin-only.decorator';
 import { RequireApproved } from '../auth/decorators/require-approved.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import type { AuthUser } from '../auth/guards/roles.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
+import { effectiveBranchScope } from '../common/branch-scope';
 import {
   AssignOrderDeliveryDto,
   CheckoutDto,
@@ -108,9 +110,18 @@ export class OrdersController {
     description: 'Paginated orders',
     schema: { example: examples('paginatedEmpty').paginatedEmpty.value },
   })
-  @Roles(UserRole.ADMIN)
-  listOrders(@Query() query: PaginationQueryDto) {
-    return this.ordersService.listAll(query.page, query.limit, query.q);
+  @AdminOnly()
+  listOrders(
+    @CurrentUser() user: AuthUser,
+    @Query() query: PaginationQueryDto,
+  ) {
+    const scope = effectiveBranchScope(user, query.branchId);
+    return this.ordersService.listAll(
+      query.page,
+      query.limit,
+      query.q,
+      scope,
+    );
   }
 
   @Patch('admin/orders/:id/status')
@@ -124,7 +135,7 @@ export class OrdersController {
     description: 'Updated order',
     schema: { example: examples('orderResponse').orderResponse.value },
   })
-  @Roles(UserRole.ADMIN)
+  @AdminOnly()
   updateStatus(@Param('id') id: string, @Body() dto: UpdateOrderStatusDto) {
     return this.ordersService.updateStatus(id, dto);
   }
@@ -135,7 +146,7 @@ export class OrdersController {
     summary: 'Assign a delivery guy and calculate their fee for this order',
   })
   @ApiBody({ type: AssignOrderDeliveryDto })
-  @Roles(UserRole.ADMIN)
+  @AdminOnly()
   assignDelivery(
     @Param('id') id: string,
     @Body() dto: AssignOrderDeliveryDto,

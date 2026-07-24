@@ -16,12 +16,11 @@ import {
   ApiOperation,
   ApiTags,
 } from '@nestjs/swagger';
-import { UserRole } from '../common/enums/user.enums';
 import { PurchaseOrderStatus } from '../common/enums/purchasing.enums';
 import { PaginatedStatusQueryDto } from '../common/pagination';
-import { Roles } from '../auth/decorators/roles.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
+import { AdminOnly } from '../auth/decorators/admin-only.decorator';
 import {
   CreateSupplierDto,
   SupplierPaymentDto,
@@ -40,7 +39,7 @@ import { examples } from '../swagger/examples';
 @ApiBearerAuth('JWT')
 @Controller('admin')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(UserRole.ADMIN)
+@AdminOnly()
 export class PurchasingController {
   constructor(
     private readonly suppliersService: SuppliersService,

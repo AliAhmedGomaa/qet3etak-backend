@@ -21,12 +21,15 @@ import * as bcrypt from 'bcrypt';
 import { UserRole, UserStatus } from '../common/enums/user.enums';
 import { absoluteMediaUrl } from '../common/media-url';
 import { PaginatedStatusQueryDto } from '../common/pagination';
-import { Roles } from '../auth/decorators/roles.decorator';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
+import type { AuthUser } from '../auth/guards/roles.guard';
 import { OrdersService } from '../orders/orders.service';
 import { UsersService } from '../users/users.service';
 import { WalletsService } from '../wallets/wallets.service';
+import { AdminOnly } from '../auth/decorators/admin-only.decorator';
+import { effectiveBranchScope } from '../common/branch-scope';
 import {
   CreateAdminShopDto,
   UpdateAdminShopDto,
@@ -38,7 +41,7 @@ import { examples } from '../swagger/examples';
 @ApiBearerAuth('JWT')
 @Controller('admin/shops')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(UserRole.ADMIN)
+@AdminOnly()
 export class AdminController {
   constructor(
     private readonly usersService: UsersService,
@@ -50,7 +53,10 @@ export class AdminController {
   @ApiOperation({
     summary: 'List shops (paginated, searchable, filterable by status)',
   })
-  async listShops(@Query() query: PaginatedStatusQueryDto) {
+  async listShops(
+    @CurrentUser() user: AuthUser,
+    @Query() query: PaginatedStatusQueryDto,
+  ) {
     let parsed: UserStatus | undefined;
     if (query.status) {
       if (!Object.values(UserStatus).includes(query.status as UserStatus)) {
@@ -60,11 +66,13 @@ export class AdminController {
       }
       parsed = query.status as UserStatus;
     }
+    const scope = effectiveBranchScope(user, query.branchId);
     const result = await this.usersService.findShops(
       parsed,
       query.page,
       query.limit,
       query.q,
+      scope,
     );
     return {
       ...result,
@@ -104,6 +112,7 @@ export class AdminController {
         status === UserStatus.REJECTED
           ? dto.rejectionReason?.trim()
           : undefined,
+      branchId: dto.branchId?.trim() || undefined,
     });
 
     if (status === UserStatus.APPROVED) {
@@ -151,6 +160,12 @@ export class AdminController {
       passwordHash,
       status: dto.status,
       rejectionReason: dto.rejectionReason,
+      branchId:
+        dto.branchId === undefined
+          ? undefined
+          : dto.branchId === null || dto.branchId === ''
+            ? null
+            : dto.branchId,
     });
 
     if (dto.status === UserStatus.APPROVED) {
@@ -161,10 +176,16 @@ export class AdminController {
   }
 
   @Patch(':id/status')
-  @ApiOperation({ summary: 'Approve or reject a pending shop' })
+  @ApiOperation({
+    summary: 'Update shop status (approve, reject, suspend, or reactivate)',
+  })
   @ApiBody({
     schema: {},
-    examples: examples('updateShopStatusApprove', 'updateShopStatusReject'),
+    examples: examples(
+      'updateShopStatusApprove',
+      'updateShopStatusReject',
+      'updateShopStatusSuspend',
+    ),
   })
   async updateStatus(
     @Param('id') id: string,
@@ -209,6 +230,7 @@ export class AdminController {
     const json = shop.toJSON() as Record<string, unknown>;
     return {
       ...json,
+      branchId: json.branchId ? String(json.branchId) : null,
       commercialRegPhotoUrl: absoluteMediaUrl(
         typeof json.commercialRegPhotoUrl === 'string'
           ? json.commercialRegPhotoUrl

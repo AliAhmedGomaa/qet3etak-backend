@@ -14,10 +14,12 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import type { Response } from 'express';
-import { Roles } from '../auth/decorators/roles.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
-import { UserRole } from '../common/enums/user.enums';
+import { AdminOnly } from '../auth/decorators/admin-only.decorator';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import type { AuthUser } from '../auth/guards/roles.guard';
+import { effectiveBranchScope } from '../common/branch-scope';
 import {
   InventoryReportQueryDto,
   ReportQueryDto,
@@ -28,14 +30,22 @@ import { isCsvExport, ReportsService } from './reports.service';
 @ApiBearerAuth('JWT')
 @Controller('admin/reports')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(UserRole.ADMIN)
+@AdminOnly()
 export class ReportsController {
   constructor(private readonly reportsService: ReportsService) {}
 
+  private scope(user: AuthUser, query: { branchId?: string }) {
+    return effectiveBranchScope(user, query.branchId);
+  }
+
   @Get('summary')
   @ApiOperation({ summary: 'Dashboard KPIs for a date range' })
-  getSummary(@Query() query: ReportQueryDto) {
-    return this.reportsService.getSummary(query.from, query.to);
+  getSummary(@CurrentUser() user: AuthUser, @Query() query: ReportQueryDto) {
+    return this.reportsService.getSummary(
+      query.from,
+      query.to,
+      this.scope(user, query),
+    );
   }
 
   @Get('sales')
@@ -44,6 +54,7 @@ export class ReportsController {
   })
   @ApiProduces('application/json', 'text/csv')
   async getSales(
+    @CurrentUser() user: AuthUser,
     @Query() query: ReportQueryDto,
     @Res({ passthrough: true }) res: Response,
   ) {
@@ -51,6 +62,7 @@ export class ReportsController {
       query.from,
       query.to,
       query.format ?? 'json',
+      this.scope(user, query),
     );
     return this.respond(result, res);
   }
@@ -59,6 +71,7 @@ export class ReportsController {
   @ApiOperation({ summary: 'Shop performance ranking by revenue' })
   @ApiProduces('application/json', 'text/csv')
   async getShops(
+    @CurrentUser() user: AuthUser,
     @Query() query: ReportQueryDto,
     @Res({ passthrough: true }) res: Response,
   ) {
@@ -68,6 +81,7 @@ export class ReportsController {
       query.page,
       query.limit,
       query.format ?? 'json',
+      this.scope(user, query),
     );
     return this.respond(result, res);
   }
@@ -76,6 +90,7 @@ export class ReportsController {
   @ApiOperation({ summary: 'Top products by quantity and revenue' })
   @ApiProduces('application/json', 'text/csv')
   async getProducts(
+    @CurrentUser() user: AuthUser,
     @Query() query: ReportQueryDto,
     @Res({ passthrough: true }) res: Response,
   ) {
@@ -85,6 +100,7 @@ export class ReportsController {
       query.page,
       query.limit,
       query.format ?? 'json',
+      this.scope(user, query),
     );
     return this.respond(result, res);
   }
@@ -95,6 +111,7 @@ export class ReportsController {
   })
   @ApiProduces('application/json', 'text/csv')
   async getCredit(
+    @CurrentUser() user: AuthUser,
     @Query() query: ReportQueryDto,
     @Res({ passthrough: true }) res: Response,
   ) {
@@ -102,6 +119,7 @@ export class ReportsController {
       query.from,
       query.to,
       query.format ?? 'json',
+      this.scope(user, query),
     );
     return this.respond(result, res);
   }
@@ -110,6 +128,7 @@ export class ReportsController {
   @ApiOperation({ summary: 'Delivery report by courier (fees & counts)' })
   @ApiProduces('application/json', 'text/csv')
   async getDelivery(
+    @CurrentUser() user: AuthUser,
     @Query() query: ReportQueryDto,
     @Res({ passthrough: true }) res: Response,
   ) {
@@ -117,6 +136,7 @@ export class ReportsController {
       query.from,
       query.to,
       query.format ?? 'json',
+      this.scope(user, query),
     );
     return this.respond(result, res);
   }
@@ -125,6 +145,7 @@ export class ReportsController {
   @ApiOperation({ summary: 'Returns report by status and refund method' })
   @ApiProduces('application/json', 'text/csv')
   async getReturns(
+    @CurrentUser() user: AuthUser,
     @Query() query: ReportQueryDto,
     @Res({ passthrough: true }) res: Response,
   ) {
@@ -132,13 +153,14 @@ export class ReportsController {
       query.from,
       query.to,
       query.format ?? 'json',
+      this.scope(user, query),
     );
     return this.respond(result, res);
   }
 
   @Get('inventory')
   @ApiOperation({
-    summary: 'Inventory valuation and low-stock list (point-in-time)',
+    summary: 'Inventory valuation and low-stock list (point-in-time, global HQ)',
   })
   @ApiProduces('application/json', 'text/csv')
   @ApiOkResponse({ description: 'Inventory summary + low-stock page' })

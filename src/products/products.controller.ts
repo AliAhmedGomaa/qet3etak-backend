@@ -21,11 +21,10 @@ import {
   ApiOperation,
   ApiTags,
 } from '@nestjs/swagger';
-import { UserRole } from '../common/enums/user.enums';
 import { PaginationQueryDto } from '../common/pagination';
 import { imageUploadOptions } from '../common/multer-image';
 import { RequireApproved } from '../auth/decorators/require-approved.decorator';
-import { Roles } from '../auth/decorators/roles.decorator';
+import { AdminOnly, ShopOrAdmin } from '../auth/decorators/admin-only.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import {
@@ -55,7 +54,7 @@ export class ProductsController {
     schema: { example: examples('catalogResponse').catalogResponse.value },
   })
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.SHOP_OWNER, UserRole.ADMIN)
+  @ShopOrAdmin()
   @RequireApproved()
   catalog(@Query() query: CatalogQueryDto) {
     return this.productsService.searchCatalog(query);
@@ -70,7 +69,7 @@ export class ProductsController {
     schema: { example: examples('catalogFacets').catalogFacets.value },
   })
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.SHOP_OWNER, UserRole.ADMIN)
+  @ShopOrAdmin()
   @RequireApproved()
   facets(@Query() query: CatalogQueryDto) {
     return this.productsService.getFacets(query);
@@ -88,7 +87,7 @@ export class ProductsController {
     },
   })
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.SHOP_OWNER, UserRole.ADMIN)
+  @ShopOrAdmin()
   @RequireApproved()
   calculateCart(@Body() dto: CalculateCartDto) {
     return this.productsService.calculateCart(dto);
@@ -103,7 +102,7 @@ export class ProductsController {
     schema: { example: examples('quoteResponse').quoteResponse.value },
   })
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.SHOP_OWNER, UserRole.ADMIN)
+  @ShopOrAdmin()
   @RequireApproved()
   quote(@Param('id') id: string, @Query('quantity') quantity = '1') {
     return this.productsService.quoteLine(id, Number(quantity) || 1);
@@ -118,7 +117,7 @@ export class ProductsController {
     schema: { example: examples('catalogProduct').catalogProduct.value },
   })
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.SHOP_OWNER, UserRole.ADMIN)
+  @ShopOrAdmin()
   @RequireApproved()
   catalogProduct(@Param('id') id: string) {
     return this.productsService.getCatalogProduct(id);
@@ -133,7 +132,7 @@ export class ProductsController {
     schema: { example: examples('paginatedEmpty').paginatedEmpty.value },
   })
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @AdminOnly()
   listAdmin(@Query() query: PaginationQueryDto) {
     return this.productsService.findAllAdmin(query.page, query.limit, query.q);
   }
@@ -191,7 +190,7 @@ export class ProductsController {
     },
   })
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @AdminOnly()
   @UseInterceptors(productImageUpload)
   create(
     @Body() dto: CreateProductDto,
@@ -208,7 +207,7 @@ export class ProductsController {
   @ApiBearerAuth('JWT')
   @ApiOperation({ summary: 'Get a product by ID (admin)' })
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @AdminOnly()
   getOne(@Param('id') id: string) {
     return this.productsService.findById(id);
   }
@@ -256,7 +255,7 @@ export class ProductsController {
     },
   })
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @AdminOnly()
   @UseInterceptors(productImageUpload)
   update(
     @Param('id') id: string,
@@ -271,7 +270,7 @@ export class ProductsController {
   @ApiBearerAuth('JWT')
   @ApiOperation({ summary: 'Delete a product (admin)' })
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @AdminOnly()
   remove(@Param('id') id: string) {
     return this.productsService.remove(id);
   }

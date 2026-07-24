@@ -25,6 +25,7 @@ import { InvoicesModule } from './invoices/invoices.module';
 import { ImportModule } from './import/import.module';
 import { ReturnsModule } from './returns/returns.module';
 import { ReportsModule } from './reports/reports.module';
+import { BranchesModule } from './branches/branches.module';
 
 @Module({
   imports: [
@@ -42,6 +43,7 @@ import { ReportsModule } from './reports/reports.module';
     UsersModule,
     AuthModule,
     AdminModule,
+    BranchesModule,
     BrandsModule,
     CategoriesModule,
     ProductsModule,

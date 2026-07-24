@@ -7,6 +7,7 @@ import {
 } from '@nestjs/swagger';
 import { UserRole } from '../common/enums/user.enums';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { AdminOnly } from '../auth/decorators/admin-only.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import type { AuthUser } from '../auth/guards/roles.guard';
@@ -53,7 +54,7 @@ export class ShopChatController {
 @ApiBearerAuth('JWT')
 @Controller('admin/chat')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(UserRole.ADMIN)
+@AdminOnly()
 export class AdminChatController {
   constructor(private readonly chatService: ChatService) {}
 
@@ -65,9 +66,12 @@ export class AdminChatController {
 
   @Get(':shopId')
   @ApiOperation({ summary: 'Get chat thread with a specific shop' })
-  async thread(@Param('shopId') shopId: string) {
+  async thread(
+    @CurrentUser() user: AuthUser,
+    @Param('shopId') shopId: string,
+  ) {
     const messages = await this.chatService.getMessages(shopId);
-    await this.chatService.markRead(shopId, UserRole.ADMIN);
+    await this.chatService.markRead(shopId, user.role);
     return { messages };
   }
 
@@ -82,7 +86,7 @@ export class AdminChatController {
     return this.chatService.sendMessage({
       shopId,
       senderId: user.userId,
-      senderRole: UserRole.ADMIN,
+      senderRole: user.role,
       text: dto.text,
     });
   }

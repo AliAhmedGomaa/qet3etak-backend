@@ -15,11 +15,10 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { DeliveryGuyStatus } from '../common/enums/delivery.enums';
-import { UserRole } from '../common/enums/user.enums';
 import { PaginationQueryDto } from '../common/pagination';
-import { Roles } from '../auth/decorators/roles.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
+import { AdminOnly } from '../auth/decorators/admin-only.decorator';
 import {
   CalculateDeliveryFeeDto,
   CreateDeliveryGuyDto,
@@ -31,7 +30,7 @@ import { DeliveryGuysService } from './delivery-guys.service';
 @ApiBearerAuth('JWT')
 @Controller('admin/delivery-guys')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(UserRole.ADMIN)
+@AdminOnly()
 export class DeliveryGuysController {
   constructor(private readonly deliveryGuysService: DeliveryGuysService) {}
 

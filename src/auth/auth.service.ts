@@ -69,6 +69,13 @@ export class AuthService {
     if (!ok) {
       throw new UnauthorizedException('Invalid phone or password');
     }
+    if (user.status === UserStatus.SUSPENDED) {
+      throw new UnauthorizedException({
+        code: 'SUSPENDED',
+        message:
+          'Account suspended / الحساب موقوف — تواصل مع الإدارة لإعادة التفعيل',
+      });
+    }
     return this.tokenResponse(user);
   }
 

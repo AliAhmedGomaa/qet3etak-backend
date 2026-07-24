@@ -16,6 +16,7 @@ import {
   paginatedResult,
   type PaginatedResult,
 } from '../common/pagination';
+import { withBranchFilter } from '../common/branch-scope';
 import { OrdersService } from '../orders/orders.service';
 import { ProductsService } from '../products/products.service';
 import { PushService } from '../push/push.service';
@@ -69,6 +70,7 @@ export class ReturnsService {
     const created = await this.returnModel.create({
       shopId: order.shopId,
       shopName: order.shopName,
+      branchId: order.branchId,
       orderId: order._id,
       orderNumber: order.orderNumber,
       paymentMethod: order.paymentMethod,
@@ -122,6 +124,7 @@ export class ReturnsService {
     page?: number,
     limit?: number,
     q?: string,
+    branchScope?: string | null,
   ): Promise<PaginatedResult<Record<string, unknown>>> {
     const p = normalizePagination(page, limit, 20);
     const filter: Record<string, unknown> = {};
@@ -135,14 +138,15 @@ export class ReturnsService {
         { reason: rx },
       ];
     }
+    const scoped = withBranchFilter(filter, branchScope ?? null);
     const [items, total] = await Promise.all([
       this.returnModel
-        .find(filter)
+        .find(scoped)
         .sort({ createdAt: -1 })
         .skip(p.skip)
         .limit(p.limit)
         .exec(),
-      this.returnModel.countDocuments(filter).exec(),
+      this.returnModel.countDocuments(scoped).exec(),
     ]);
     return paginatedResult(
       items.map((item) => this.toView(item)),
@@ -154,6 +158,16 @@ export class ReturnsService {
 
   async getById(id: string): Promise<Record<string, unknown>> {
     return this.toView(await this.findByIdOrFail(id));
+  }
+
+  /** Live count of PENDING return requests (admin nav badge). */
+  async pendingCount(branchScope?: string | null): Promise<{ count: number }> {
+    const filter = withBranchFilter(
+      { status: ReturnRequestStatus.PENDING },
+      branchScope ?? null,
+    );
+    const count = await this.returnModel.countDocuments(filter).exec();
+    return { count };
   }
 
   async approve(

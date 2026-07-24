@@ -50,6 +50,14 @@ export class ReportQueryDto {
   @IsOptional()
   @IsIn(['json', 'csv'])
   format?: 'json' | 'csv' = 'json';
+
+  @ApiPropertyOptional({
+    example: '664f1a2b3c4d5e6f7a8b9c0d',
+    description: 'Filter by branch id (ADMIN). Branch managers are auto-scoped.',
+  })
+  @IsOptional()
+  @IsString()
+  branchId?: string;
 }
 
 /** Inventory is point-in-time; date range optional / unused for stock levels. */

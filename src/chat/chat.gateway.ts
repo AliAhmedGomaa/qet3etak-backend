@@ -11,7 +11,7 @@ import {
   ConnectedSocket,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
-import { UserRole } from '../common/enums/user.enums';
+import { UserRole, isAdminPanelRole } from '../common/enums/user.enums';
 import { buildCorsOptions } from '../common/cors';
 import { UsersService } from '../users/users.service';
 import {
@@ -69,7 +69,7 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection {
       };
       client.data.user = socketUser;
 
-      if (socketUser.role === UserRole.ADMIN) {
+      if (isAdminPanelRole(socketUser.role)) {
         await client.join(ADMIN_ROOM);
       } else {
         await client.join(shopRoom(socketUser.userId));
@@ -99,7 +99,7 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection {
     if (!text) return;
 
     const shopId =
-      user.role === UserRole.ADMIN ? body?.shopId : user.userId;
+      isAdminPanelRole(user.role) ? body?.shopId : user.userId;
     if (!shopId) return;
 
     await this.chatService.sendMessage({
@@ -118,7 +118,7 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection {
   ): Promise<void> {
     const user = client.data.user;
     if (!user) return;
-    const shopId = user.role === UserRole.ADMIN ? body?.shopId : user.userId;
+    const shopId = isAdminPanelRole(user.role) ? body?.shopId : user.userId;
     if (!shopId) return;
     await this.chatService.markRead(shopId, user.role);
   }
@@ -134,11 +134,11 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection {
   ): Promise<void> {
     const user = client.data.user;
     if (!user) return;
-    const shopId = user.role === UserRole.ADMIN ? body?.shopId : user.userId;
+    const shopId = isAdminPanelRole(user.role) ? body?.shopId : user.userId;
     if (!shopId) return;
 
     const room =
-      user.role === UserRole.ADMIN ? adminViewRoom(shopId) : shopViewRoom(shopId);
+      isAdminPanelRole(user.role) ? adminViewRoom(shopId) : shopViewRoom(shopId);
 
     if (body?.active) {
       await client.join(room);
@@ -155,11 +155,11 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection {
   ): void {
     const user = client.data.user;
     if (!user) return;
-    const shopId = user.role === UserRole.ADMIN ? body?.shopId : user.userId;
+    const shopId = isAdminPanelRole(user.role) ? body?.shopId : user.userId;
     if (!shopId) return;
 
     const payload = { shopId, isTyping: !!body?.isTyping, role: user.role };
-    if (user.role === UserRole.ADMIN) {
+    if (isAdminPanelRole(user.role)) {
       this.server.to(shopRoom(shopId)).emit('typing', payload);
     } else {
       this.server.to(ADMIN_ROOM).emit('typing', payload);

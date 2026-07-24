@@ -9,6 +9,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { AdminOnly } from '../auth/decorators/admin-only.decorator';
 import {
   ApiBearerAuth,
   ApiBody,
@@ -18,8 +19,6 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import type { Response } from 'express';
-import { UserRole } from '../common/enums/user.enums';
-import { Roles } from '../auth/decorators/roles.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { ImportService } from './import.service';
@@ -30,7 +29,7 @@ const importUpload = FileInterceptor('file', importUploadOptions());
 @ApiTags('Admin — Import')
 @ApiBearerAuth('JWT')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(UserRole.ADMIN)
+@AdminOnly()
 @Controller('admin/import')
 export class ImportController {
   constructor(private readonly importService: ImportService) {}

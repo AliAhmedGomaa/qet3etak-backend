@@ -13,6 +13,7 @@ import {
   paginatedResult,
   type PaginatedResult,
 } from '../common/pagination';
+import { withBranchFilter } from '../common/branch-scope';
 import { UsersService } from '../users/users.service';
 import { Invoice, InvoiceDocument } from './schemas/invoice.schema';
 
@@ -22,6 +23,7 @@ export type OrderInvoiceSource = {
   orderNumber: string;
   shopId: Types.ObjectId;
   shopName: string;
+  branchId?: Types.ObjectId;
   paymentMethod: PaymentMethod;
   items: Array<{
     productId?: Types.ObjectId;
@@ -81,6 +83,7 @@ export class InvoicesService {
         orderNumber: order.orderNumber,
         shopId: order.shopId,
         shopName: order.shopName || shop.shopName,
+        branchId: order.branchId ?? shop.branchId,
         seller: this.sellerFromConfig(),
         buyer: {
           name: shop.shopName || order.shopName,
@@ -179,12 +182,16 @@ export class InvoicesService {
     limit?: number,
     q?: string,
     status?: InvoiceStatus,
+    branchScope?: string | null,
   ): Promise<PaginatedResult<InvoiceDocument>> {
     const p = normalizePagination(page, limit, 20);
-    const filter: Record<string, unknown> = {
-      ...buildInvoiceSearchFilter(q),
-    };
-    if (status) filter['status'] = status;
+    const filter = withBranchFilter(
+      {
+        ...buildInvoiceSearchFilter(q),
+        ...(status ? { status } : {}),
+      },
+      branchScope ?? null,
+    );
     const [items, total] = await Promise.all([
       this.invoiceModel
         .find(filter)

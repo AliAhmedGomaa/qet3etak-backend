@@ -20,11 +20,13 @@ import {
   PaginationQueryDto,
 } from '../common/pagination';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { AdminOnly } from '../auth/decorators/admin-only.decorator';
 import { RequireApproved } from '../auth/decorators/require-approved.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import type { AuthUser } from '../auth/guards/roles.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
+import { effectiveBranchScope } from '../common/branch-scope';
 import { InvoicesService } from './invoices.service';
 
 @Controller()
@@ -77,8 +79,11 @@ export class InvoicesController {
   @ApiOperation({
     summary: 'List all invoices (paginated, search, optional status filter)',
   })
-  @Roles(UserRole.ADMIN)
-  listInvoices(@Query() query: PaginatedStatusQueryDto) {
+  @AdminOnly()
+  listInvoices(
+    @CurrentUser() user: AuthUser,
+    @Query() query: PaginatedStatusQueryDto,
+  ) {
     let status: InvoiceStatus | undefined;
     if (query.status) {
       const allowed = Object.values(InvoiceStatus) as string[];
@@ -87,18 +92,20 @@ export class InvoicesController {
       }
       status = query.status as InvoiceStatus;
     }
+    const scope = effectiveBranchScope(user, query.branchId);
     return this.invoicesService.listAll(
       query.page,
       query.limit,
       query.q,
       status,
+      scope,
     );
   }
 
   @Get('admin/invoices/:id')
   @ApiTags('Admin — Invoices')
   @ApiOperation({ summary: 'Get invoice by ID (admin)' })
-  @Roles(UserRole.ADMIN)
+  @AdminOnly()
   getInvoice(@Param('id') id: string) {
     return this.invoicesService.getById(id);
   }
@@ -106,7 +113,7 @@ export class InvoicesController {
   @Patch('admin/invoices/:id/void')
   @ApiTags('Admin — Invoices')
   @ApiOperation({ summary: 'Void an invoice (admin)' })
-  @Roles(UserRole.ADMIN)
+  @AdminOnly()
   voidInvoice(@Param('id') id: string) {
     return this.invoicesService.voidInvoice(id);
   }

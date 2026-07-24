@@ -20,11 +20,10 @@ import {
   ApiOperation,
   ApiTags,
 } from '@nestjs/swagger';
-import { UserRole } from '../common/enums/user.enums';
 import { PaginationQueryDto } from '../common/pagination';
 import { imageUploadOptions } from '../common/multer-image';
 import { RequireApproved } from '../auth/decorators/require-approved.decorator';
-import { Roles } from '../auth/decorators/roles.decorator';
+import { AdminOnly, ShopOrAdmin } from '../auth/decorators/admin-only.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { BrandsService } from './brands.service';
@@ -50,7 +49,7 @@ export class BrandsController {
     schema: { example: examples('paginatedEmpty').paginatedEmpty.value },
   })
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.SHOP_OWNER, UserRole.ADMIN)
+  @ShopOrAdmin()
   @RequireApproved()
   listWholesale(@Query() query: PaginationQueryDto) {
     return this.brandsService.listActive(query.page, query.limit, query.q);
@@ -65,7 +64,7 @@ export class BrandsController {
     schema: { example: examples('paginatedEmpty').paginatedEmpty.value },
   })
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @AdminOnly()
   listAdmin(@Query() query: PaginationQueryDto) {
     return this.brandsService.listAll(query.page, query.limit, query.q);
   }
@@ -99,7 +98,7 @@ export class BrandsController {
     schema: { example: examples('brand').brand.value },
   })
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @AdminOnly()
   @UseInterceptors(iconUpload)
   create(
     @Body() dto: CreateBrandDto,
@@ -136,7 +135,7 @@ export class BrandsController {
     schema: { example: examples('brand').brand.value },
   })
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @AdminOnly()
   @UseInterceptors(iconUpload)
   update(
     @Param('id') id: string,
@@ -151,7 +150,7 @@ export class BrandsController {
   @ApiBearerAuth('JWT')
   @ApiOperation({ summary: 'Delete a brand (admin)' })
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @AdminOnly()
   remove(@Param('id') id: string) {
     return this.brandsService.remove(id);
   }

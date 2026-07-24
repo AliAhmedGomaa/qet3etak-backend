@@ -15,6 +15,7 @@ import {
 } from '@nestjs/swagger';
 import { UserRole } from '../common/enums/user.enums';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { AdminOnly } from '../auth/decorators/admin-only.decorator';
 import { RequireApproved } from '../auth/decorators/require-approved.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -89,7 +90,7 @@ export class PushController {
     examples: examples('pushSubscribeRequest'),
   })
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @AdminOnly()
   subscribeAdmin(
     @CurrentUser() user: AuthUser,
     @Body() dto: SavePushSubscriptionDto,
@@ -106,7 +107,7 @@ export class PushController {
     examples: examples('pushUnsubscribeRequest'),
   })
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @AdminOnly()
   unsubscribeAdmin(
     @CurrentUser() user: AuthUser,
     @Body() body: UnsubscribePushDto,
@@ -127,7 +128,7 @@ export class PushController {
     schema: { example: examples('broadcastResponse').broadcastResponse.value },
   })
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @AdminOnly()
   async broadcast(@Body() dto: BroadcastDto) {
     return this.pushService.broadcastToShopOwners(
       {

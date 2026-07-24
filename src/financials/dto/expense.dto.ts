@@ -58,4 +58,12 @@ export class PnlQueryDto {
   @IsOptional()
   @IsString()
   endDate?: string;
+
+  @ApiPropertyOptional({
+    example: '664f1a2b3c4d5e6f7a8b9c0d',
+    description: 'Filter P&L by branch (ADMIN). Branch managers are auto-scoped.',
+  })
+  @IsOptional()
+  @IsString()
+  branchId?: string;
 }

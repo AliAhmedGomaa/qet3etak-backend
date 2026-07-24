@@ -15,14 +15,15 @@ import {
   ApiOperation,
   ApiTags,
 } from '@nestjs/swagger';
-import { UserRole } from '../common/enums/user.enums';
 import { PaginationQueryDto } from '../common/pagination';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { AdminOnly, ShopOrAdmin } from '../auth/decorators/admin-only.decorator';
 import { RequireApproved } from '../auth/decorators/require-approved.decorator';
-import { Roles } from '../auth/decorators/roles.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import type { AuthUser } from '../auth/guards/roles.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
+import { effectiveBranchScope } from '../common/branch-scope';
+import { UsersService } from '../users/users.service';
 import { RecordPaymentDto, SetCreditLimitDto } from '../orders/dto/order.dto';
 import { WalletsService } from './wallets.service';
 import { examples } from '../swagger/examples';
@@ -31,7 +32,10 @@ import { examples } from '../swagger/examples';
 @ApiBearerAuth('JWT')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class WalletsController {
-  constructor(private readonly walletsService: WalletsService) {}
+  constructor(
+    private readonly walletsService: WalletsService,
+    private readonly usersService: UsersService,
+  ) {}
 
   @Get('wholesale/wallet')
   @ApiTags('Wholesale — Wallet')
@@ -40,7 +44,7 @@ export class WalletsController {
     description: 'Wallet view',
     schema: { example: examples('walletResponse').walletResponse.value },
   })
-  @Roles(UserRole.SHOP_OWNER, UserRole.ADMIN)
+  @ShopOrAdmin()
   @RequireApproved()
   async myWallet(
     @CurrentUser() user: AuthUser,
@@ -57,9 +61,22 @@ export class WalletsController {
     description: 'Paginated wallets',
     schema: { example: examples('paginatedEmpty').paginatedEmpty.value },
   })
-  @Roles(UserRole.ADMIN)
-  listWallets(@Query() query: PaginationQueryDto) {
-    return this.walletsService.listShopWallets(query.page, query.limit);
+  @AdminOnly()
+  async listWallets(
+    @CurrentUser() user: AuthUser,
+    @Query() query: PaginationQueryDto,
+  ) {
+    const scope = effectiveBranchScope(user, query.branchId);
+    const shopIds =
+      scope !== null
+        ? await this.usersService.findShopIdsByBranch(scope)
+        : undefined;
+    return this.walletsService.listShopWallets(
+      query.page,
+      query.limit,
+      scope,
+      shopIds,
+    );
   }
 
   @Get('admin/wallets/:shopId')
@@ -69,7 +86,7 @@ export class WalletsController {
     description: 'Wallet view',
     schema: { example: examples('walletResponse').walletResponse.value },
   })
-  @Roles(UserRole.ADMIN)
+  @AdminOnly()
   async getWallet(
     @Param('shopId') shopId: string,
     @Query() query: PaginationQueryDto,
@@ -89,7 +106,7 @@ export class WalletsController {
     description: 'Wallet view',
     schema: { example: examples('walletResponse').walletResponse.value },
   })
-  @Roles(UserRole.ADMIN)
+  @AdminOnly()
   async setLimit(
     @Param('shopId') shopId: string,
     @Body() dto: SetCreditLimitDto,
@@ -115,7 +132,7 @@ export class WalletsController {
     description: 'Wallet view',
     schema: { example: examples('walletResponse').walletResponse.value },
   })
-  @Roles(UserRole.ADMIN)
+  @AdminOnly()
   async recordPayment(
     @Param('shopId') shopId: string,
     @Body() dto: RecordPaymentDto,

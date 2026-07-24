@@ -11,6 +11,7 @@ import {
   paginatedResult,
   type PaginatedResult,
 } from '../common/pagination';
+import { withBranchFilter } from '../common/branch-scope';
 import { ProductsService } from '../products/products.service';
 import { resolveUnitPrice } from '../products/pricing.util';
 import { UsersService } from '../users/users.service';
@@ -110,6 +111,7 @@ export class OrdersService {
       orderNumber,
       shopId: new Types.ObjectId(shopUserId),
       shopName: shop.shopName,
+      branchId: shop.branchId,
       status: OrderStatus.RECEIVED,
       paymentMethod: dto.paymentMethod,
       items: priced.lines,
@@ -315,9 +317,10 @@ export class OrdersService {
     page?: number,
     limit?: number,
     q?: string,
+    branchScope?: string | null,
   ): Promise<PaginatedResult<OrderDocument>> {
     const p = normalizePagination(page, limit, 20);
-    const filter = buildOrderSearchFilter(q);
+    const filter = withBranchFilter(buildOrderSearchFilter(q), branchScope ?? null);
     const [items, total] = await Promise.all([
       this.orderModel
         .find(filter)

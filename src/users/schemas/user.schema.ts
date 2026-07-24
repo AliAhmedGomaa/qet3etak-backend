@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { HydratedDocument } from 'mongoose';
+import { HydratedDocument, Types } from 'mongoose';
 import { UserRole, UserStatus } from '../../common/enums/user.enums';
 
 export type UserDocument = HydratedDocument<User>;
@@ -33,6 +33,14 @@ export class User {
 
   @Prop({ type: String, enum: UserRole, default: UserRole.SHOP_OWNER })
   role!: UserRole;
+
+  /**
+   * Optional branch assignment.
+   * - SHOP_OWNER: which branch the shop belongs to (null = HQ / unassigned)
+   * - BRANCH_MANAGER: the branch they manage
+   */
+  @Prop({ type: Types.ObjectId, ref: 'Branch', index: true })
+  branchId?: Types.ObjectId;
 
   /** Optional note when an admin rejects the shop */
   @Prop({ trim: true })

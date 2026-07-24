@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import type { Server } from 'socket.io';
-import { UserRole } from '../common/enums/user.enums';
+import { UserRole, isAdminPanelRole } from '../common/enums/user.enums';
 import { PushService } from '../push/push.service';
 import { ChatMessage } from './schemas/message.schema';
 import { Conversation } from './schemas/conversation.schema';
@@ -161,14 +161,16 @@ export class ChatService {
   /** Mark the thread read for whichever side is viewing it. */
   async markRead(shopId: string, reader: UserRole): Promise<void> {
     const shopObjectId = new Types.ObjectId(shopId);
-    const readerIsAdmin = reader === UserRole.ADMIN;
+    const readerIsAdmin = isAdminPanelRole(reader);
 
     // Messages from the *other* party become read.
     await this.messageModel
       .updateMany(
         {
           shopId: shopObjectId,
-          senderRole: readerIsAdmin ? UserRole.SHOP_OWNER : UserRole.ADMIN,
+          senderRole: readerIsAdmin
+            ? UserRole.SHOP_OWNER
+            : { $ne: UserRole.SHOP_OWNER },
           read: false,
         },
         { read: true },
