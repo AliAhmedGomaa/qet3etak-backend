@@ -8,6 +8,13 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
+import {
+  ApiBearerAuth,
+  ApiBody,
+  ApiOkResponse,
+  ApiOperation,
+  ApiTags,
+} from '@nestjs/swagger';
 import { UserRole } from '../common/enums/user.enums';
 import { PaginationQueryDto } from '../common/pagination';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
@@ -18,13 +25,21 @@ import type { AuthUser } from '../auth/guards/roles.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { RecordPaymentDto, SetCreditLimitDto } from '../orders/dto/order.dto';
 import { WalletsService } from './wallets.service';
+import { examples } from '../swagger/examples';
 
 @Controller()
+@ApiBearerAuth('JWT')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class WalletsController {
   constructor(private readonly walletsService: WalletsService) {}
 
   @Get('wholesale/wallet')
+  @ApiTags('Wholesale — Wallet')
+  @ApiOperation({ summary: 'Get my wallet (balance + transactions)' })
+  @ApiOkResponse({
+    description: 'Wallet view',
+    schema: { example: examples('walletResponse').walletResponse.value },
+  })
   @Roles(UserRole.SHOP_OWNER, UserRole.ADMIN)
   @RequireApproved()
   async myWallet(
@@ -36,12 +51,24 @@ export class WalletsController {
   }
 
   @Get('admin/wallets')
+  @ApiTags('Admin — Wallets')
+  @ApiOperation({ summary: 'List all shop wallets (admin, paginated)' })
+  @ApiOkResponse({
+    description: 'Paginated wallets',
+    schema: { example: examples('paginatedEmpty').paginatedEmpty.value },
+  })
   @Roles(UserRole.ADMIN)
   listWallets(@Query() query: PaginationQueryDto) {
     return this.walletsService.listShopWallets(query.page, query.limit);
   }
 
   @Get('admin/wallets/:shopId')
+  @ApiTags('Admin — Wallets')
+  @ApiOperation({ summary: 'Get a shop wallet by shop ID (admin)' })
+  @ApiOkResponse({
+    description: 'Wallet view',
+    schema: { example: examples('walletResponse').walletResponse.value },
+  })
   @Roles(UserRole.ADMIN)
   async getWallet(
     @Param('shopId') shopId: string,
@@ -52,6 +79,16 @@ export class WalletsController {
   }
 
   @Patch('admin/wallets/:shopId/credit-limit')
+  @ApiTags('Admin — Wallets')
+  @ApiOperation({ summary: 'Set credit limit for a shop (admin)' })
+  @ApiBody({
+    type: SetCreditLimitDto,
+    examples: examples('setCreditLimitRequest'),
+  })
+  @ApiOkResponse({
+    description: 'Wallet view',
+    schema: { example: examples('walletResponse').walletResponse.value },
+  })
   @Roles(UserRole.ADMIN)
   async setLimit(
     @Param('shopId') shopId: string,
@@ -68,6 +105,16 @@ export class WalletsController {
   }
 
   @Post('admin/wallets/:shopId/payments')
+  @ApiTags('Admin — Wallets')
+  @ApiOperation({ summary: 'Record a debt payment for a shop (admin)' })
+  @ApiBody({
+    type: RecordPaymentDto,
+    examples: examples('recordPaymentRequest'),
+  })
+  @ApiOkResponse({
+    description: 'Wallet view',
+    schema: { example: examples('walletResponse').walletResponse.value },
+  })
   @Roles(UserRole.ADMIN)
   async recordPayment(
     @Param('shopId') shopId: string,

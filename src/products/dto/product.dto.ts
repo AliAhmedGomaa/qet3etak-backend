@@ -1,3 +1,4 @@
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type, Transform, plainToInstance } from 'class-transformer';
 import {
   ArrayMinSize,
@@ -42,11 +43,13 @@ function parseTieredPricing(value: unknown): TieredPriceDto[] | undefined {
 }
 
 export class TieredPriceDto {
+  @ApiProperty({ example: 5, minimum: 1 })
   @Type(() => Number)
   @IsNumber()
   @Min(1)
   minQty!: number;
 
+  @ApiProperty({ example: 78, minimum: 0 })
   @Type(() => Number)
   @IsNumber()
   @Min(0)
@@ -54,40 +57,53 @@ export class TieredPriceDto {
 }
 
 export class CreateProductDto {
+  @ApiProperty({ example: 'Samsung S23 Battery' })
   @IsString()
   @MinLength(2)
   title!: string;
 
+  @ApiProperty({ example: 'Samsung' })
   @IsString()
   @MinLength(1)
   brand!: string;
 
+  @ApiProperty({ example: 'Galaxy S23' })
   @IsString()
   @MinLength(1)
   model!: string;
 
+  @ApiProperty({ example: 'Batteries' })
   @IsString()
   @MinLength(1)
   category!: string;
 
+  @ApiPropertyOptional({ example: 'Battery Pack' })
   @IsOptional()
   @IsString()
   @MinLength(1)
   part?: string;
 
+  @ApiProperty({ enum: QualityGrade, example: QualityGrade.Original })
   @IsEnum(QualityGrade)
   qualityGrade!: QualityGrade;
 
+  @ApiProperty({ example: 100, minimum: 0 })
   @Type(() => Number)
   @IsNumber()
   @Min(0)
   stockQuantity!: number;
 
+  @ApiProperty({ example: 28, minimum: 0 })
   @Type(() => Number)
   @IsNumber()
   @Min(0)
   basePrice!: number;
 
+  @ApiPropertyOptional({
+    type: [TieredPriceDto],
+    description:
+      'Quantity price breaks. In multipart requests, send as a JSON string.',
+  })
   @IsOptional()
   @Transform(({ value }) => parseTieredPricing(value))
   @IsArray()
@@ -95,10 +111,12 @@ export class CreateProductDto {
   @Type(() => TieredPriceDto)
   tieredPricing?: TieredPriceDto[];
 
+  @ApiPropertyOptional({ example: 'BAT-S23-ORG' })
   @IsOptional()
   @IsString()
   sku?: string;
 
+  @ApiPropertyOptional({ example: true, default: true })
   @IsOptional()
   @Transform(({ value }) => toOptionalBoolean(value))
   @IsBoolean()
@@ -106,43 +124,56 @@ export class CreateProductDto {
 }
 
 export class UpdateProductDto {
+  @ApiPropertyOptional({ example: 'Samsung S23 Battery' })
   @IsOptional()
   @IsString()
   @MinLength(2)
   title?: string;
 
+  @ApiPropertyOptional({ example: 'Samsung' })
   @IsOptional()
   @IsString()
   brand?: string;
 
+  @ApiPropertyOptional({ example: 'Galaxy S23' })
   @IsOptional()
   @IsString()
   model?: string;
 
+  @ApiPropertyOptional({ example: 'Batteries' })
   @IsOptional()
   @IsString()
   category?: string;
 
+  @ApiPropertyOptional({ example: 'Battery Pack' })
   @IsOptional()
   @IsString()
   part?: string;
 
+  @ApiPropertyOptional({ enum: QualityGrade, example: QualityGrade.Original })
   @IsOptional()
   @IsEnum(QualityGrade)
   qualityGrade?: QualityGrade;
 
+  @ApiPropertyOptional({ example: 100, minimum: 0 })
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
   @Min(0)
   stockQuantity?: number;
 
+  @ApiPropertyOptional({ example: 28, minimum: 0 })
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
   @Min(0)
   basePrice?: number;
 
+  @ApiPropertyOptional({
+    type: [TieredPriceDto],
+    description:
+      'Quantity price breaks. In multipart requests, send as a JSON string.',
+  })
   @IsOptional()
   @Transform(({ value }) => parseTieredPricing(value))
   @IsArray()
@@ -150,10 +181,12 @@ export class UpdateProductDto {
   @Type(() => TieredPriceDto)
   tieredPricing?: TieredPriceDto[];
 
+  @ApiPropertyOptional({ example: 'BAT-S23-ORG' })
   @IsOptional()
   @IsString()
   sku?: string;
 
+  @ApiPropertyOptional({ example: true })
   @IsOptional()
   @Transform(({ value }) => toOptionalBoolean(value))
   @IsBoolean()
@@ -161,38 +194,47 @@ export class UpdateProductDto {
 }
 
 export class CatalogQueryDto {
+  @ApiPropertyOptional({ description: 'Free-text search' })
   @IsOptional()
   @IsString()
   q?: string;
 
-  /** Comma-separated multi-select values */
+  @ApiPropertyOptional({ description: 'Comma-separated multi-select values' })
   @IsOptional()
   @IsString()
   brand?: string;
 
+  @ApiPropertyOptional()
   @IsOptional()
   @IsString()
   model?: string;
 
+  @ApiPropertyOptional()
   @IsOptional()
   @IsString()
   category?: string;
 
-  /** Comma-separated part names (generic — accepts exact names or synonyms) */
+  @ApiPropertyOptional({
+    description:
+      'Comma-separated part names (generic — accepts exact names or synonyms)',
+  })
   @IsOptional()
   @IsString()
   part?: string;
 
+  @ApiPropertyOptional({ enum: QualityGrade })
   @IsOptional()
   @IsString()
   qualityGrade?: string;
 
+  @ApiPropertyOptional({ default: 1, minimum: 1 })
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
   @Min(1)
   page?: number = 1;
 
+  @ApiPropertyOptional({ default: 24, minimum: 1 })
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
@@ -201,9 +243,11 @@ export class CatalogQueryDto {
 }
 
 export class CartLineDto {
+  @ApiProperty({ example: '6a5ed4b2f718e30c208e48d0' })
   @IsString()
   productId!: string;
 
+  @ApiProperty({ example: 5, minimum: 1 })
   @Type(() => Number)
   @IsNumber()
   @Min(1)
@@ -211,6 +255,7 @@ export class CartLineDto {
 }
 
 export class CalculateCartDto {
+  @ApiProperty({ type: [CartLineDto] })
   @IsArray()
   @ArrayMinSize(1)
   @ValidateNested({ each: true })

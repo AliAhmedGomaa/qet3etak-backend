@@ -1,3 +1,4 @@
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
   ArrayMinSize,
@@ -13,9 +14,11 @@ import {
 import { OrderStatus, PaymentMethod } from '../../common/enums/order.enums';
 
 export class CheckoutItemDto {
+  @ApiProperty({ example: '6a5ed4b2f718e30c208e48d0' })
   @IsString()
   productId!: string;
 
+  @ApiProperty({ example: 2, minimum: 1 })
   @Type(() => Number)
   @IsNumber()
   @Min(1)
@@ -23,46 +26,55 @@ export class CheckoutItemDto {
 }
 
 export class CheckoutDto {
+  @ApiProperty({ type: [CheckoutItemDto] })
   @IsArray()
   @ArrayMinSize(1)
   @ValidateNested({ each: true })
   @Type(() => CheckoutItemDto)
   items!: CheckoutItemDto[];
 
+  @ApiProperty({ enum: PaymentMethod, example: PaymentMethod.CASH_ON_DELIVERY })
   @IsEnum(PaymentMethod)
   paymentMethod!: PaymentMethod;
 
+  @ApiPropertyOptional({ example: 'Deliver before noon' })
   @IsOptional()
   @IsString()
   notes?: string;
 }
 
 export class UpdateOrderStatusDto {
+  @ApiProperty({ enum: OrderStatus, example: OrderStatus.PREPARING })
   @IsEnum(OrderStatus)
   status!: OrderStatus;
 
+  @ApiPropertyOptional({ example: 'Picking items' })
   @IsOptional()
   @IsString()
   note?: string;
 }
 
 export class SetCreditLimitDto {
+  @ApiProperty({ example: 75000, minimum: 0 })
   @Type(() => Number)
   @IsNumber()
   @Min(0)
   creditLimit!: number;
 
+  @ApiPropertyOptional({ example: 'Trusted shop — raise limit' })
   @IsOptional()
   @IsString()
   note?: string;
 }
 
 export class RecordPaymentDto {
+  @ApiProperty({ example: 5000, minimum: 0.01 })
   @Type(() => Number)
   @IsNumber()
   @Min(0.01)
   amount!: number;
 
+  @ApiPropertyOptional({ example: 'Cash collection 21 Jul' })
   @IsOptional()
   @IsString()
   @MinLength(2)

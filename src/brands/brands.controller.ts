@@ -12,6 +12,14 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import {
+  ApiBearerAuth,
+  ApiBody,
+  ApiConsumes,
+  ApiOkResponse,
+  ApiOperation,
+  ApiTags,
+} from '@nestjs/swagger';
 import { diskStorage } from 'multer';
 import { existsSync, mkdirSync } from 'fs';
 import { extname, join } from 'path';
@@ -23,6 +31,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { BrandsService } from './brands.service';
 import { CreateBrandDto, UpdateBrandDto } from './dto/brand.dto';
+import { examples } from '../swagger/examples';
 
 const uploadsDir = join(process.cwd(), 'uploads');
 if (!existsSync(uploadsDir)) {
@@ -52,6 +61,13 @@ export class BrandsController {
 
   /** Active brands for shop catalog / home (name + icon). */
   @Get('wholesale/brands')
+  @ApiTags('Wholesale — Brands')
+  @ApiBearerAuth('JWT')
+  @ApiOperation({ summary: 'List active brands for shop catalog / home' })
+  @ApiOkResponse({
+    description: 'Paginated brands',
+    schema: { example: examples('paginatedEmpty').paginatedEmpty.value },
+  })
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.SHOP_OWNER, UserRole.ADMIN)
   @RequireApproved()
@@ -60,6 +76,13 @@ export class BrandsController {
   }
 
   @Get('admin/brands')
+  @ApiTags('Admin — Brands')
+  @ApiBearerAuth('JWT')
+  @ApiOperation({ summary: 'List all brands (admin, paginated)' })
+  @ApiOkResponse({
+    description: 'Paginated brands',
+    schema: { example: examples('paginatedEmpty').paginatedEmpty.value },
+  })
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.ADMIN)
   listAdmin(@Query() query: PaginationQueryDto) {
@@ -67,6 +90,33 @@ export class BrandsController {
   }
 
   @Post('admin/brands')
+  @ApiTags('Admin — Brands')
+  @ApiBearerAuth('JWT')
+  @ApiOperation({
+    summary: 'Create a brand (admin)',
+    description: 'Multipart form: text fields + optional `icon` image (jpeg/png/webp/svg, max 4MB).',
+  })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: ['name'],
+      properties: {
+        name: { type: 'string', example: 'Nothing' },
+        sortOrder: { type: 'number', example: 11 },
+        isActive: { type: 'boolean', example: true },
+        icon: {
+          type: 'string',
+          format: 'binary',
+          description: 'Brand icon',
+        },
+      },
+    },
+  })
+  @ApiOkResponse({
+    description: 'Created brand',
+    schema: { example: examples('brand').brand.value },
+  })
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.ADMIN)
   @UseInterceptors(iconUpload)
@@ -78,6 +128,32 @@ export class BrandsController {
   }
 
   @Patch('admin/brands/:id')
+  @ApiTags('Admin — Brands')
+  @ApiBearerAuth('JWT')
+  @ApiOperation({
+    summary: 'Update a brand (admin)',
+    description: 'Multipart form: text fields + optional `icon` image (jpeg/png/webp/svg, max 4MB).',
+  })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', example: 'Nothing' },
+        sortOrder: { type: 'number', example: 11 },
+        isActive: { type: 'boolean', example: true },
+        icon: {
+          type: 'string',
+          format: 'binary',
+          description: 'Brand icon (optional; keeps existing if omitted)',
+        },
+      },
+    },
+  })
+  @ApiOkResponse({
+    description: 'Updated brand',
+    schema: { example: examples('brand').brand.value },
+  })
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.ADMIN)
   @UseInterceptors(iconUpload)
@@ -90,6 +166,9 @@ export class BrandsController {
   }
 
   @Delete('admin/brands/:id')
+  @ApiTags('Admin — Brands')
+  @ApiBearerAuth('JWT')
+  @ApiOperation({ summary: 'Delete a brand (admin)' })
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.ADMIN)
   remove(@Param('id') id: string) {

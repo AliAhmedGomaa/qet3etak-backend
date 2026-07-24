@@ -13,6 +13,14 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import {
+  ApiBearerAuth,
+  ApiBody,
+  ApiConsumes,
+  ApiOkResponse,
+  ApiOperation,
+  ApiTags,
+} from '@nestjs/swagger';
 import { diskStorage } from 'multer';
 import { existsSync, mkdirSync } from 'fs';
 import { extname, join } from 'path';
@@ -29,6 +37,7 @@ import {
   UpdateProductDto,
 } from './dto/product.dto';
 import { ProductsService } from './products.service';
+import { examples } from '../swagger/examples';
 
 const uploadsDir = join(process.cwd(), 'uploads');
 if (!existsSync(uploadsDir)) {
@@ -57,6 +66,13 @@ export class ProductsController {
   constructor(private readonly productsService: ProductsService) {}
 
   @Get('wholesale/catalog')
+  @ApiTags('Wholesale — Catalog')
+  @ApiBearerAuth('JWT')
+  @ApiOperation({ summary: 'Browse wholesale catalog (paginated + filtered)' })
+  @ApiOkResponse({
+    description: 'Paginated catalog',
+    schema: { example: examples('catalogResponse').catalogResponse.value },
+  })
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.SHOP_OWNER, UserRole.ADMIN)
   @RequireApproved()
@@ -65,6 +81,13 @@ export class ProductsController {
   }
 
   @Get('wholesale/catalog/facets')
+  @ApiTags('Wholesale — Catalog')
+  @ApiBearerAuth('JWT')
+  @ApiOperation({ summary: 'Get available filter facets for the catalog' })
+  @ApiOkResponse({
+    description: 'Facet values',
+    schema: { example: examples('catalogFacets').catalogFacets.value },
+  })
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.SHOP_OWNER, UserRole.ADMIN)
   @RequireApproved()
@@ -73,6 +96,16 @@ export class ProductsController {
   }
 
   @Post('wholesale/cart/calculate')
+  @ApiTags('Wholesale — Catalog')
+  @ApiBearerAuth('JWT')
+  @ApiOperation({ summary: 'Calculate cart totals with tiered pricing' })
+  @ApiBody({ type: CalculateCartDto, examples: examples('calculateCartRequest') })
+  @ApiOkResponse({
+    description: 'Priced cart',
+    schema: {
+      example: examples('calculateCartResponse').calculateCartResponse.value,
+    },
+  })
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.SHOP_OWNER, UserRole.ADMIN)
   @RequireApproved()
@@ -81,6 +114,13 @@ export class ProductsController {
   }
 
   @Get('wholesale/products/:id/quote')
+  @ApiTags('Wholesale — Catalog')
+  @ApiBearerAuth('JWT')
+  @ApiOperation({ summary: 'Get a price quote for a single product line' })
+  @ApiOkResponse({
+    description: 'Single-line quote',
+    schema: { example: examples('quoteResponse').quoteResponse.value },
+  })
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.SHOP_OWNER, UserRole.ADMIN)
   @RequireApproved()
@@ -89,6 +129,13 @@ export class ProductsController {
   }
 
   @Get('wholesale/products/:id')
+  @ApiTags('Wholesale — Catalog')
+  @ApiBearerAuth('JWT')
+  @ApiOperation({ summary: 'Get catalog product details' })
+  @ApiOkResponse({
+    description: 'Catalog product card',
+    schema: { example: examples('catalogProduct').catalogProduct.value },
+  })
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.SHOP_OWNER, UserRole.ADMIN)
   @RequireApproved()
@@ -97,6 +144,13 @@ export class ProductsController {
   }
 
   @Get('admin/products')
+  @ApiTags('Admin — Products')
+  @ApiBearerAuth('JWT')
+  @ApiOperation({ summary: 'List all products (admin, paginated + search)' })
+  @ApiOkResponse({
+    description: 'Paginated products',
+    schema: { example: examples('paginatedEmpty').paginatedEmpty.value },
+  })
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.ADMIN)
   listAdmin(@Query() query: PaginationQueryDto) {
@@ -104,6 +158,57 @@ export class ProductsController {
   }
 
   @Post('admin/products')
+  @ApiTags('Admin — Products')
+  @ApiBearerAuth('JWT')
+  @ApiOperation({
+    summary: 'Create a product (admin)',
+    description: 'Multipart form: text fields + required `image` (jpeg/png/webp, max 8MB).',
+  })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: [
+        'title',
+        'brand',
+        'model',
+        'category',
+        'qualityGrade',
+        'stockQuantity',
+        'basePrice',
+        'image',
+      ],
+      properties: {
+        title: { type: 'string', example: 'Samsung S23 Battery' },
+        brand: { type: 'string', example: 'Samsung' },
+        model: { type: 'string', example: 'Galaxy S23' },
+        category: { type: 'string', example: 'Batteries' },
+        part: { type: 'string', example: 'Battery Pack' },
+        qualityGrade: {
+          type: 'string',
+          enum: ['Original', 'HighCopy', 'Copy', 'Used'],
+          example: 'Original',
+        },
+        stockQuantity: { type: 'number', example: 100 },
+        basePrice: { type: 'number', example: 28 },
+        tieredPricing: {
+          type: 'string',
+          description: 'JSON-encoded array of { minQty, price }',
+          example: JSON.stringify([
+            { minQty: 10, price: 24 },
+            { minQty: 50, price: 21 },
+          ]),
+        },
+        sku: { type: 'string', example: 'BAT-S23-ORG' },
+        isActive: { type: 'boolean', example: true },
+        image: {
+          type: 'string',
+          format: 'binary',
+          description: 'Product image',
+        },
+      },
+    },
+  })
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.ADMIN)
   @UseInterceptors(productImageUpload)
@@ -118,6 +223,9 @@ export class ProductsController {
   }
 
   @Get('admin/products/:id')
+  @ApiTags('Admin — Products')
+  @ApiBearerAuth('JWT')
+  @ApiOperation({ summary: 'Get a product by ID (admin)' })
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.ADMIN)
   getOne(@Param('id') id: string) {
@@ -125,6 +233,47 @@ export class ProductsController {
   }
 
   @Patch('admin/products/:id')
+  @ApiTags('Admin — Products')
+  @ApiBearerAuth('JWT')
+  @ApiOperation({
+    summary: 'Update a product (admin)',
+    description: 'Multipart form: text fields + optional `image` (jpeg/png/webp, max 8MB).',
+  })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', example: 'Samsung S23 Battery' },
+        brand: { type: 'string', example: 'Samsung' },
+        model: { type: 'string', example: 'Galaxy S23' },
+        category: { type: 'string', example: 'Batteries' },
+        part: { type: 'string', example: 'Battery Pack' },
+        qualityGrade: {
+          type: 'string',
+          enum: ['Original', 'HighCopy', 'Copy', 'Used'],
+          example: 'Original',
+        },
+        stockQuantity: { type: 'number', example: 100 },
+        basePrice: { type: 'number', example: 28 },
+        tieredPricing: {
+          type: 'string',
+          description: 'JSON-encoded array of { minQty, price }',
+          example: JSON.stringify([
+            { minQty: 10, price: 24 },
+            { minQty: 50, price: 21 },
+          ]),
+        },
+        sku: { type: 'string', example: 'BAT-S23-ORG' },
+        isActive: { type: 'boolean', example: true },
+        image: {
+          type: 'string',
+          format: 'binary',
+          description: 'Product image (optional; keeps existing if omitted)',
+        },
+      },
+    },
+  })
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.ADMIN)
   @UseInterceptors(productImageUpload)
@@ -137,6 +286,9 @@ export class ProductsController {
   }
 
   @Delete('admin/products/:id')
+  @ApiTags('Admin — Products')
+  @ApiBearerAuth('JWT')
+  @ApiOperation({ summary: 'Delete a product (admin)' })
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.ADMIN)
   remove(@Param('id') id: string) {

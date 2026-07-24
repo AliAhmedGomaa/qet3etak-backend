@@ -1,3 +1,4 @@
+import { ApiPropertyOptional, ApiProperty } from '@nestjs/swagger';
 import { Type, Transform } from 'class-transformer';
 import {
   IsBoolean,
@@ -16,19 +17,23 @@ function toOptionalBoolean(value: unknown): boolean | undefined {
 }
 
 export class CreateBrandDto {
+  @ApiProperty({ example: 'Nothing' })
   @IsString()
   @MinLength(1)
   name!: string;
 
+  @ApiPropertyOptional({ description: 'Set internally when an icon is uploaded' })
   @IsOptional()
   @IsString()
   iconUrl?: string;
 
+  @ApiPropertyOptional({ example: true, default: true })
   @IsOptional()
   @Transform(({ value }) => toOptionalBoolean(value))
   @IsBoolean()
   isActive?: boolean;
 
+  @ApiPropertyOptional({ example: 11 })
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
@@ -36,20 +41,24 @@ export class CreateBrandDto {
 }
 
 export class UpdateBrandDto {
+  @ApiPropertyOptional({ example: 'Nothing' })
   @IsOptional()
   @IsString()
   @MinLength(1)
   name?: string;
 
+  @ApiPropertyOptional({ description: 'Set internally when an icon is uploaded' })
   @IsOptional()
   @IsString()
   iconUrl?: string;
 
+  @ApiPropertyOptional({ example: true })
   @IsOptional()
   @Transform(({ value }) => toOptionalBoolean(value))
   @IsBoolean()
   isActive?: boolean;
 
+  @ApiPropertyOptional({ example: 11 })
   @IsOptional()
   @Type(() => Number)
   @IsNumber()

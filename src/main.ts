@@ -3,6 +3,7 @@ import { NestFactory } from '@nestjs/core';
 import { existsSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { AppModule } from './app.module';
+import { setupSwagger } from './swagger/setup';
 
 async function bootstrap() {
   const uploadsDir = join(process.cwd(), 'uploads');
@@ -24,7 +25,12 @@ async function bootstrap() {
       forbidNonWhitelisted: true,
     }),
   );
-  await app.listen(process.env.PORT ?? 3000);
-  console.log(`API listening on http://localhost:${process.env.PORT ?? 3000}`);
+
+  setupSwagger(app);
+
+  const port = process.env.PORT ?? 3000;
+  await app.listen(port);
+  console.log(`API listening on http://localhost:${port}`);
+  console.log(`Swagger UI at http://localhost:${port}/docs`);
 }
 bootstrap();

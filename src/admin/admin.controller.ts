@@ -8,6 +8,12 @@ import {
   UseGuards,
   BadRequestException,
 } from '@nestjs/common';
+import {
+  ApiBearerAuth,
+  ApiBody,
+  ApiOperation,
+  ApiTags,
+} from '@nestjs/swagger';
 import { UserRole, UserStatus } from '../common/enums/user.enums';
 import { absoluteMediaUrl } from '../common/media-url';
 import { PaginatedStatusQueryDto } from '../common/pagination';
@@ -17,7 +23,10 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import { UsersService } from '../users/users.service';
 import { WalletsService } from '../wallets/wallets.service';
 import { UpdateShopStatusDto } from './dto/update-shop-status.dto';
+import { examples } from '../swagger/examples';
 
+@ApiTags('Admin — Shops')
+@ApiBearerAuth('JWT')
 @Controller('admin/shops')
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles(UserRole.ADMIN)
@@ -28,6 +37,7 @@ export class AdminController {
   ) {}
 
   @Get()
+  @ApiOperation({ summary: 'List shops (paginated, filterable by status)' })
   async listShops(@Query() query: PaginatedStatusQueryDto) {
     let parsed: UserStatus | undefined;
     if (query.status) {
@@ -50,6 +60,11 @@ export class AdminController {
   }
 
   @Patch(':id/status')
+  @ApiOperation({ summary: 'Approve or reject a pending shop' })
+  @ApiBody({
+    schema: {},
+    examples: examples('updateShopStatusApprove', 'updateShopStatusReject'),
+  })
   async updateStatus(
     @Param('id') id: string,
     @Body() dto: UpdateShopStatusDto,

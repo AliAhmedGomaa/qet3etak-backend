@@ -12,6 +12,14 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import {
+  ApiBearerAuth,
+  ApiBody,
+  ApiConsumes,
+  ApiOkResponse,
+  ApiOperation,
+  ApiTags,
+} from '@nestjs/swagger';
 import { diskStorage } from 'multer';
 import { extname, join } from 'path';
 import { existsSync, mkdirSync } from 'fs';
@@ -32,6 +40,7 @@ import {
   QuoteSpecialRequestDto,
 } from '../push/dto/push.dto';
 import { SpecialRequestsService } from './special-requests.service';
+import { examples } from '../swagger/examples';
 
 const uploadsDir = join(process.cwd(), 'uploads');
 if (!existsSync(uploadsDir)) {
@@ -39,11 +48,39 @@ if (!existsSync(uploadsDir)) {
 }
 
 @Controller()
+@ApiBearerAuth('JWT')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class SpecialRequestsController {
   constructor(private readonly requestsService: SpecialRequestsService) {}
 
   @Post('wholesale/special-requests')
+  @ApiTags('Wholesale — Special Requests')
+  @ApiOperation({
+    summary: 'Create a special/rare part request',
+    description: 'Multipart form: text fields + optional `photo` image (jpeg/png/webp, max 10MB).',
+  })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: ['deviceModel', 'partName', 'quantity', 'targetPrice'],
+      properties: {
+        deviceModel: { type: 'string', example: 'iPhone 13 Pro' },
+        partName: { type: 'string', example: 'True Tone Flex' },
+        quantity: { type: 'number', example: 3 },
+        targetPrice: { type: 'number', example: 120 },
+        photo: {
+          type: 'string',
+          format: 'binary',
+          description: 'Reference photo of the part',
+        },
+      },
+    },
+  })
+  @ApiOkResponse({
+    description: 'Created special request',
+    schema: { example: examples('specialRequest').specialRequest.value },
+  })
   @Roles(UserRole.SHOP_OWNER)
   @RequireApproved()
   @UseInterceptors(
@@ -73,6 +110,12 @@ export class SpecialRequestsController {
   }
 
   @Get('wholesale/special-requests')
+  @ApiTags('Wholesale — Special Requests')
+  @ApiOperation({ summary: 'List my special requests (paginated)' })
+  @ApiOkResponse({
+    description: 'Paginated special requests',
+    schema: { example: examples('paginatedEmpty').paginatedEmpty.value },
+  })
   @Roles(UserRole.SHOP_OWNER)
   @RequireApproved()
   myRequests(
@@ -87,6 +130,14 @@ export class SpecialRequestsController {
   }
 
   @Get('admin/special-requests')
+  @ApiTags('Admin — Special Requests')
+  @ApiOperation({
+    summary: 'List all special requests (admin, filter by status)',
+  })
+  @ApiOkResponse({
+    description: 'Paginated special requests',
+    schema: { example: examples('paginatedEmpty').paginatedEmpty.value },
+  })
   @Roles(UserRole.ADMIN)
   list(@Query() query: PaginatedStatusQueryDto) {
     if (
@@ -106,12 +157,28 @@ export class SpecialRequestsController {
   }
 
   @Patch('admin/special-requests/:id/quote')
+  @ApiTags('Admin — Special Requests')
+  @ApiOperation({ summary: 'Quote a special request (admin)' })
+  @ApiBody({
+    type: QuoteSpecialRequestDto,
+    examples: examples('quoteSpecialRequest'),
+  })
+  @ApiOkResponse({
+    description: 'Updated special request',
+    schema: { example: examples('specialRequest').specialRequest.value },
+  })
   @Roles(UserRole.ADMIN)
   quote(@Param('id') id: string, @Body() dto: QuoteSpecialRequestDto) {
     return this.requestsService.quote(id, dto);
   }
 
   @Patch('admin/special-requests/:id/fulfill')
+  @ApiTags('Admin — Special Requests')
+  @ApiOperation({ summary: 'Mark a special request as fulfilled (admin)' })
+  @ApiOkResponse({
+    description: 'Updated special request',
+    schema: { example: examples('specialRequest').specialRequest.value },
+  })
   @Roles(UserRole.ADMIN)
   fulfill(@Param('id') id: string) {
     return this.requestsService.fulfill(id);

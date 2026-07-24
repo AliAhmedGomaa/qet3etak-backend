@@ -12,6 +12,14 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import {
+  ApiBearerAuth,
+  ApiBody,
+  ApiConsumes,
+  ApiOkResponse,
+  ApiOperation,
+  ApiTags,
+} from '@nestjs/swagger';
 import { diskStorage } from 'multer';
 import { existsSync, mkdirSync } from 'fs';
 import { extname, join } from 'path';
@@ -23,6 +31,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { CategoriesService } from './categories.service';
 import { CreateCategoryDto, UpdateCategoryDto } from './dto/category.dto';
+import { examples } from '../swagger/examples';
 
 const uploadsDir = join(process.cwd(), 'uploads');
 if (!existsSync(uploadsDir)) {
@@ -51,6 +60,13 @@ export class CategoriesController {
   constructor(private readonly categoriesService: CategoriesService) {}
 
   @Get('wholesale/categories')
+  @ApiTags('Wholesale — Categories')
+  @ApiBearerAuth('JWT')
+  @ApiOperation({ summary: 'List active categories for shop catalog / home' })
+  @ApiOkResponse({
+    description: 'Paginated categories',
+    schema: { example: examples('paginatedEmpty').paginatedEmpty.value },
+  })
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.SHOP_OWNER, UserRole.ADMIN)
   @RequireApproved()
@@ -59,6 +75,13 @@ export class CategoriesController {
   }
 
   @Get('admin/categories')
+  @ApiTags('Admin — Categories')
+  @ApiBearerAuth('JWT')
+  @ApiOperation({ summary: 'List all categories (admin, paginated)' })
+  @ApiOkResponse({
+    description: 'Paginated categories',
+    schema: { example: examples('paginatedEmpty').paginatedEmpty.value },
+  })
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.ADMIN)
   listAdmin(@Query() query: PaginationQueryDto) {
@@ -66,6 +89,33 @@ export class CategoriesController {
   }
 
   @Post('admin/categories')
+  @ApiTags('Admin — Categories')
+  @ApiBearerAuth('JWT')
+  @ApiOperation({
+    summary: 'Create a category (admin)',
+    description: 'Multipart form: text fields + optional `icon` image (jpeg/png/webp/svg, max 4MB).',
+  })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: ['name'],
+      properties: {
+        name: { type: 'string', example: 'Microphones' },
+        sortOrder: { type: 'number', example: 11 },
+        isActive: { type: 'boolean', example: true },
+        icon: {
+          type: 'string',
+          format: 'binary',
+          description: 'Category icon',
+        },
+      },
+    },
+  })
+  @ApiOkResponse({
+    description: 'Created category',
+    schema: { example: examples('category').category.value },
+  })
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.ADMIN)
   @UseInterceptors(iconUpload)
@@ -77,6 +127,32 @@ export class CategoriesController {
   }
 
   @Patch('admin/categories/:id')
+  @ApiTags('Admin — Categories')
+  @ApiBearerAuth('JWT')
+  @ApiOperation({
+    summary: 'Update a category (admin)',
+    description: 'Multipart form: text fields + optional `icon` image (jpeg/png/webp/svg, max 4MB).',
+  })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', example: 'Microphones' },
+        sortOrder: { type: 'number', example: 11 },
+        isActive: { type: 'boolean', example: true },
+        icon: {
+          type: 'string',
+          format: 'binary',
+          description: 'Category icon (optional; keeps existing if omitted)',
+        },
+      },
+    },
+  })
+  @ApiOkResponse({
+    description: 'Updated category',
+    schema: { example: examples('category').category.value },
+  })
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.ADMIN)
   @UseInterceptors(iconUpload)
@@ -89,6 +165,9 @@ export class CategoriesController {
   }
 
   @Delete('admin/categories/:id')
+  @ApiTags('Admin — Categories')
+  @ApiBearerAuth('JWT')
+  @ApiOperation({ summary: 'Delete a category (admin)' })
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.ADMIN)
   remove(@Param('id') id: string) {

@@ -1,13 +1,16 @@
+import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import { IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
 
 export class PaginationQueryDto {
+  @ApiPropertyOptional({ example: 1, minimum: 1, default: 1 })
   @IsOptional()
   @Type(() => Number)
   @IsInt()
   @Min(1)
   page?: number = 1;
 
+  @ApiPropertyOptional({ example: 20, minimum: 1, maximum: 100, default: 20 })
   @IsOptional()
   @Type(() => Number)
   @IsInt()
@@ -16,6 +19,7 @@ export class PaginationQueryDto {
   limit?: number = 20;
 
   /** Free-text search (products admin, etc.). */
+  @ApiPropertyOptional({ example: 'samsung', description: 'Free-text search' })
   @IsOptional()
   @IsString()
   q?: string;
@@ -23,6 +27,11 @@ export class PaginationQueryDto {
 
 /** Pagination + optional status filter (shops / special-requests). */
 export class PaginatedStatusQueryDto extends PaginationQueryDto {
+  @ApiPropertyOptional({
+    example: 'PENDING',
+    description:
+      'Status filter (context-specific: shops, special-requests, purchase-orders, …)',
+  })
   @IsOptional()
   @IsString()
   status?: string;
