@@ -26,11 +26,10 @@ import { examples } from '../swagger/examples';
 import { UnsubscribePushDto } from '../swagger/common.dto';
 
 @Controller()
-@ApiBearerAuth('JWT')
-@UseGuards(JwtAuthGuard, RolesGuard)
 export class PushController {
   constructor(private readonly pushService: PushService) {}
 
+  /** Public — browsers need this before/during Notification permission. */
   @Get('push/vapid-public-key')
   @ApiTags('Wholesale — Push')
   @ApiOperation({ summary: 'Get the VAPID public key for push subscriptions' })
@@ -38,18 +37,22 @@ export class PushController {
     description: 'VAPID public key',
     schema: { example: examples('vapidPublicKey').vapidPublicKey.value },
   })
-  @Roles(UserRole.SHOP_OWNER, UserRole.ADMIN)
   vapidKey() {
-    return { publicKey: this.pushService.getPublicKey() };
+    return {
+      publicKey: this.pushService.getPublicKey(),
+      enabled: this.pushService.isEnabled(),
+    };
   }
 
   @Post('wholesale/push/subscribe')
   @ApiTags('Wholesale — Push')
+  @ApiBearerAuth('JWT')
   @ApiOperation({ summary: 'Save a push subscription (shop owner)' })
   @ApiBody({
     type: SavePushSubscriptionDto,
     examples: examples('pushSubscribeRequest'),
   })
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.SHOP_OWNER)
   @RequireApproved()
   subscribe(
@@ -61,11 +64,13 @@ export class PushController {
 
   @Delete('wholesale/push/subscribe')
   @ApiTags('Wholesale — Push')
+  @ApiBearerAuth('JWT')
   @ApiOperation({ summary: 'Remove a push subscription (shop owner)' })
   @ApiBody({
     type: UnsubscribePushDto,
     examples: examples('pushUnsubscribeRequest'),
   })
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.SHOP_OWNER)
   @RequireApproved()
   unsubscribe(
@@ -77,11 +82,13 @@ export class PushController {
 
   @Post('admin/push/subscribe')
   @ApiTags('Admin — Push')
+  @ApiBearerAuth('JWT')
   @ApiOperation({ summary: 'Save a push subscription (admin)' })
   @ApiBody({
     type: SavePushSubscriptionDto,
     examples: examples('pushSubscribeRequest'),
   })
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.ADMIN)
   subscribeAdmin(
     @CurrentUser() user: AuthUser,
@@ -92,11 +99,13 @@ export class PushController {
 
   @Delete('admin/push/subscribe')
   @ApiTags('Admin — Push')
+  @ApiBearerAuth('JWT')
   @ApiOperation({ summary: 'Remove a push subscription (admin)' })
   @ApiBody({
     type: UnsubscribePushDto,
     examples: examples('pushUnsubscribeRequest'),
   })
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.ADMIN)
   unsubscribeAdmin(
     @CurrentUser() user: AuthUser,
@@ -107,12 +116,14 @@ export class PushController {
 
   @Post('admin/push/broadcast')
   @ApiTags('Admin — Push')
+  @ApiBearerAuth('JWT')
   @ApiOperation({ summary: 'Broadcast a notification to all shop owners' })
   @ApiBody({ type: BroadcastDto, examples: examples('broadcastRequest') })
   @ApiOkResponse({
     description: 'Broadcast result',
     schema: { example: examples('broadcastResponse').broadcastResponse.value },
   })
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.ADMIN)
   async broadcast(@Body() dto: BroadcastDto) {
     const sent = await this.pushService.broadcastToShopOwners({
@@ -121,6 +132,6 @@ export class PushController {
       url: dto.url || '/home',
       tag: 'broadcast',
     });
-    return { sent };
+    return { sent, enabled: this.pushService.isEnabled() };
   }
 }

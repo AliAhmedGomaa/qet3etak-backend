@@ -27,23 +27,35 @@ export class PushService implements OnModuleInit {
   ) {}
 
   onModuleInit(): void {
-    const publicKey = this.config.get<string>('VAPID_PUBLIC_KEY');
-    const privateKey = this.config.get<string>('VAPID_PRIVATE_KEY');
-    const subject = this.config.get<string>(
-      'VAPID_SUBJECT',
-      'mailto:admin@qet3etak.local',
-    );
-    if (publicKey && privateKey) {
+    const publicKey = this.config.get<string>('VAPID_PUBLIC_KEY')?.trim();
+    const privateKey = this.config.get<string>('VAPID_PRIVATE_KEY')?.trim();
+    const subject = (
+      this.config.get<string>('VAPID_SUBJECT') || 'mailto:admin@qet3etak.com'
+    ).trim();
+
+    if (!publicKey || !privateKey) {
+      this.logger.warn('VAPID keys missing — push notifications disabled');
+      return;
+    }
+
+    try {
       webpush.setVapidDetails(subject, publicKey, privateKey);
       this.enabled = true;
-      this.logger.log('Web Push VAPID configured');
-    } else {
-      this.logger.warn('VAPID keys missing — push notifications disabled');
+      this.logger.log(`Web Push VAPID configured (${subject})`);
+    } catch (err) {
+      this.enabled = false;
+      this.logger.error(
+        `VAPID setup failed — push disabled: ${(err as Error).message}`,
+      );
     }
   }
 
+  isEnabled(): boolean {
+    return this.enabled;
+  }
+
   getPublicKey(): string {
-    return this.config.get<string>('VAPID_PUBLIC_KEY', '');
+    return this.config.get<string>('VAPID_PUBLIC_KEY', '').trim();
   }
 
   async saveSubscription(
@@ -63,7 +75,7 @@ export class PushService implements OnModuleInit {
           keys: subscription.keys,
           audience,
         },
-        { upsert: true, new: true, setDefaultsOnInsert: true },
+        { upsert: true, returnDocument: 'after', setDefaultsOnInsert: true },
       )
       .exec() as Promise<PushSubscriptionDocument>;
   }
@@ -77,7 +89,10 @@ export class PushService implements OnModuleInit {
   }
 
   async notifyUser(userId: string, payload: PushPayload): Promise<number> {
-    if (!this.enabled) return 0;
+    if (!this.enabled) {
+      this.logger.warn('notifyUser skipped — VAPID not enabled');
+      return 0;
+    }
     const subs = await this.subModel
       .find({ userId: new Types.ObjectId(userId) })
       .exec();
@@ -85,13 +100,19 @@ export class PushService implements OnModuleInit {
   }
 
   async broadcastToShopOwners(payload: PushPayload): Promise<number> {
-    if (!this.enabled) return 0;
+    if (!this.enabled) {
+      this.logger.warn('broadcast skipped — VAPID not enabled');
+      return 0;
+    }
     const subs = await this.subModel.find({ audience: 'SHOP_OWNER' }).exec();
     return this.sendToSubs(subs, payload);
   }
 
   async notifyAdmins(payload: PushPayload): Promise<number> {
-    if (!this.enabled) return 0;
+    if (!this.enabled) {
+      this.logger.warn('notifyAdmins skipped — VAPID not enabled');
+      return 0;
+    }
     const subs = await this.subModel.find({ audience: 'ADMIN' }).exec();
     return this.sendToSubs(subs, payload);
   }
@@ -100,14 +121,30 @@ export class PushService implements OnModuleInit {
     subs: PushSubscriptionDocument[],
     payload: PushPayload,
   ): Promise<number> {
+    if (!subs.length) {
+      this.logger.debug('No push subscriptions for payload');
+      return 0;
+    }
+
+    // Angular ngsw expects { notification: { title, body, ... } }
+    // Icon paths must be absolute from the app origin (SW scope).
     const body = JSON.stringify({
       notification: {
         title: payload.title,
         body: payload.body,
-        icon: 'icons/icon-192x192.png',
-        badge: 'icons/icon-72x72.png',
+        icon: '/icons/icon-192x192.png',
+        badge: '/icons/icon-72x72.png',
         tag: payload.tag || 'qet3etak',
-        data: { onActionClick: { default: { operation: 'openWindow', url: payload.url || '/' } }, url: payload.url || '/' },
+        renotify: true,
+        data: {
+          url: payload.url || '/',
+          onActionClick: {
+            default: {
+              operation: 'openWindow',
+              url: payload.url || '/',
+            },
+          },
+        },
       },
     });
 
@@ -121,17 +158,25 @@ export class PushService implements OnModuleInit {
               keys: { p256dh: sub.keys.p256dh, auth: sub.keys.auth },
             },
             body,
+            {
+              TTL: 60 * 60,
+              urgency: 'high',
+            },
           );
           sent += 1;
         } catch (err: unknown) {
           const status = (err as { statusCode?: number })?.statusCode;
-          this.logger.warn(`Push failed (${status ?? 'err'}) for ${sub.endpoint.slice(0, 48)}`);
+          const message = (err as Error)?.message;
+          this.logger.warn(
+            `Push failed (${status ?? 'err'}) ${message ?? ''} for ${sub.endpoint.slice(0, 48)}`,
+          );
           if (status === 404 || status === 410) {
             await this.subModel.deleteOne({ _id: sub._id }).exec();
           }
         }
       }),
     );
+    this.logger.log(`Push sent ${sent}/${subs.length}`);
     return sent;
   }
 }
