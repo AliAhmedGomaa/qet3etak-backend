@@ -1,26 +1,25 @@
-# NestJS API on Render. MongoDB must be Atlas (or any reachable URI) —
-# local Docker Mongo is not reachable from Render.
+# NestJS API on Render.
+# Use MongoDB Atlas (local Docker Mongo is not reachable from Render).
 services:
   - type: web
     name: qet3etak-api
     runtime: node
     plan: free
     region: frankfurt
+    # Do NOT set NODE_ENV=production at build time — that skips
+    # devDependencies (@nestjs/cli, typescript) and breaks `nest build`.
     buildCommand: npm ci && npm run build
-    startCommand: npm run start:prod
+    startCommand: NODE_ENV=production npm run start:prod
     healthCheckPath: /health
     envVars:
       - key: NODE_VERSION
         value: "22"
-      - key: NODE_ENV
-        value: production
-      - key: PORT
-        value: "3000"
-      # Set in the Render dashboard after first deploy, e.g.
+      # Render injects PORT automatically — do not hardcode it.
+      # Set after first deploy to the public Render URL, e.g.
       # https://qet3etak-api.onrender.com
       - key: PUBLIC_BASE_URL
         sync: false
-      # mongodb+srv://... from MongoDB Atlas
+      # mongodb+srv://USER:PASS@cluster.../qet3etak
       - key: MONGODB_URI
         sync: false
       - key: JWT_SECRET
