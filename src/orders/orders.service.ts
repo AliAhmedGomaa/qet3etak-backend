@@ -18,6 +18,7 @@ import { WalletsService } from '../wallets/wallets.service';
 import { PushService } from '../push/push.service';
 import { DeliveryGuysService } from '../delivery/delivery-guys.service';
 import { DeliveryGuyStatus } from '../common/enums/delivery.enums';
+import { InvoicesService } from '../invoices/invoices.service';
 import {
   AssignOrderDeliveryDto,
   CheckoutDto,
@@ -53,6 +54,7 @@ export class OrdersService {
     private readonly usersService: UsersService,
     private readonly pushService: PushService,
     private readonly deliveryGuysService: DeliveryGuysService,
+    private readonly invoicesService: InvoicesService,
   ) {}
 
   async checkout(shopUserId: string, dto: CheckoutDto): Promise<OrderDocument> {
@@ -107,7 +109,16 @@ export class OrdersService {
       );
     }
 
+    // Commercial invoice is issued at checkout (priced snapshot; 1 per order).
+    await this.invoicesService.issueFromOrder(order);
+
     return order;
+  }
+
+  countForShop(shopId: string): Promise<number> {
+    return this.orderModel
+      .countDocuments({ shopId: new Types.ObjectId(shopId) })
+      .exec();
   }
 
   async listForShop(

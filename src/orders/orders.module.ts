@@ -5,6 +5,7 @@ import { UsersModule } from '../users/users.module';
 import { WalletsModule } from '../wallets/wallets.module';
 import { PushModule } from '../push/push.module';
 import { DeliveryModule } from '../delivery/delivery.module';
+import { InvoicesModule } from '../invoices/invoices.module';
 import { Order, OrderSchema } from './schemas/order.schema';
 import { OrdersController } from './orders.controller';
 import { OrdersService } from './orders.service';
@@ -17,6 +18,7 @@ import { OrdersService } from './orders.service';
     WalletsModule,
     PushModule,
     DeliveryModule,
+    InvoicesModule,
   ],
   controllers: [OrdersController],
   providers: [OrdersService],

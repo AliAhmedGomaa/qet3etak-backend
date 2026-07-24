@@ -21,6 +21,7 @@ import { PurchasingModule } from './purchasing/purchasing.module';
 import { FinancialsModule } from './financials/financials.module';
 import { ChatModule } from './chat/chat.module';
 import { DeliveryModule } from './delivery/delivery.module';
+import { InvoicesModule } from './invoices/invoices.module';
 
 @Module({
   imports: [
@@ -49,6 +50,7 @@ import { DeliveryModule } from './delivery/delivery.module';
     FinancialsModule,
     ChatModule,
     DeliveryModule,
+    InvoicesModule,
   ],
   controllers: [HealthController],
 })
