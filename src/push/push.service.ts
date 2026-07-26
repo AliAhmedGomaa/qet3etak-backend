@@ -28,6 +28,23 @@ export type BroadcastResult = {
   enabled: boolean;
 };
 
+export type PushDebugStats = {
+  enabled: boolean;
+  vapidPublicKeyPrefix: string;
+  vapidSubject: string;
+  totals: {
+    all: number;
+    admin: number;
+    shopOwner: number;
+  };
+  recentEndpoints: Array<{
+    audience: string;
+    userId: string;
+    endpointHost: string;
+    updatedAt?: string;
+  }>;
+};
+
 @Injectable()
 export class PushService implements OnModuleInit {
   private readonly logger = new Logger(PushService.name);
@@ -48,18 +65,22 @@ export class PushService implements OnModuleInit {
     ).trim();
 
     if (!publicKey || !privateKey) {
-      this.logger.warn('VAPID keys missing — push notifications disabled');
+      this.logger.warn(
+        '[push] VAPID keys missing — push notifications DISABLED (set VAPID_PUBLIC_KEY + VAPID_PRIVATE_KEY)',
+      );
       return;
     }
 
     try {
       webpush.setVapidDetails(subject, publicKey, privateKey);
       this.enabled = true;
-      this.logger.log(`Web Push VAPID configured (${subject})`);
+      this.logger.log(
+        `[push] VAPID OK subject=${subject} publicKeyPrefix=${publicKey.slice(0, 12)}…`,
+      );
     } catch (err) {
       this.enabled = false;
       this.logger.error(
-        `VAPID setup failed — push disabled: ${(err as Error).message}`,
+        `[push] VAPID setup FAILED — push disabled: ${(err as Error).message}`,
       );
     }
   }
@@ -80,7 +101,11 @@ export class PushService implements OnModuleInit {
     },
     audience: 'SHOP_OWNER' | 'ADMIN' = 'SHOP_OWNER',
   ): Promise<PushSubscriptionDocument> {
-    return this.subModel
+    const host = this.endpointHost(subscription.endpoint);
+    this.logger.log(
+      `[push] subscribe start audience=${audience} userId=${userId} endpointHost=${host}`,
+    );
+    const doc = (await this.subModel
       .findOneAndUpdate(
         { endpoint: subscription.endpoint },
         {
@@ -91,7 +116,11 @@ export class PushService implements OnModuleInit {
         },
         { upsert: true, returnDocument: 'after', setDefaultsOnInsert: true },
       )
-      .exec() as Promise<PushSubscriptionDocument>;
+      .exec()) as PushSubscriptionDocument;
+    this.logger.log(
+      `[push] subscribe saved audience=${audience} userId=${userId} subId=${String(doc._id)} endpointHost=${host}`,
+    );
+    return doc;
   }
 
   async removeSubscription(userId: string, endpoint?: string): Promise<void> {
@@ -99,18 +128,32 @@ export class PushService implements OnModuleInit {
       userId: new Types.ObjectId(userId),
     };
     if (endpoint) filter['endpoint'] = endpoint;
-    await this.subModel.deleteMany(filter).exec();
+    const res = await this.subModel.deleteMany(filter).exec();
+    this.logger.log(
+      `[push] unsubscribe userId=${userId} endpointHost=${endpoint ? this.endpointHost(endpoint) : 'ALL'} deleted=${res.deletedCount ?? 0}`,
+    );
   }
 
   async notifyUser(userId: string, payload: PushPayload): Promise<number> {
     if (!this.enabled) {
-      this.logger.warn('notifyUser skipped — VAPID not enabled');
+      this.logger.warn(
+        `[push] notifyUser SKIPPED (VAPID off) userId=${userId} tag=${payload.tag ?? '-'} title="${payload.title}"`,
+      );
       return 0;
     }
     const subs = await this.subModel
       .find({ userId: new Types.ObjectId(userId) })
       .exec();
-    const { sent } = await this.sendToSubs(subs, payload);
+    this.logger.log(
+      `[push] notifyUser userId=${userId} subs=${subs.length} tag=${payload.tag ?? '-'} title="${payload.title}"`,
+    );
+    if (!subs.length) {
+      this.logger.warn(
+        `[push] notifyUser NO_SUBSCRIPTIONS userId=${userId} — shop must enable notifications on HTTPS/PWA`,
+      );
+      return 0;
+    }
+    const { sent, failed } = await this.sendToSubs(subs, payload, 'notifyUser');
     return sent;
   }
 
@@ -119,14 +162,18 @@ export class PushService implements OnModuleInit {
     shopIds?: string[],
   ): Promise<BroadcastResult> {
     if (!this.enabled) {
-      this.logger.warn('broadcast skipped — VAPID not enabled');
+      this.logger.warn(
+        `[push] broadcast SKIPPED (VAPID off) title="${payload.title}"`,
+      );
       return { targeted: 0, sent: 0, failed: 0, enabled: false };
     }
 
     const filter: Record<string, unknown> = { audience: 'SHOP_OWNER' };
     let targeted: number;
 
-    const selected = [...new Set((shopIds ?? []).map((id) => id.trim()).filter(Boolean))];
+    const selected = [
+      ...new Set((shopIds ?? []).map((id) => id.trim()).filter(Boolean)),
+    ];
 
     if (selected.length) {
       const shops =
@@ -134,6 +181,9 @@ export class PushService implements OnModuleInit {
       if (shops.length !== selected.length) {
         const found = new Set(shops.map((s) => String(s._id)));
         const invalidShopIds = selected.filter((id) => !found.has(id));
+        this.logger.warn(
+          `[push] broadcast invalid shopIds=${invalidShopIds.join(',')}`,
+        );
         throw new BadRequestException({
           message:
             'Some shopIds are invalid or not eligible (must be approved shop owners)',
@@ -147,31 +197,91 @@ export class PushService implements OnModuleInit {
     }
 
     const subs = await this.subModel.find(filter).exec();
-    const { sent, failed } = await this.sendToSubs(subs, payload);
+    this.logger.log(
+      `[push] broadcast shopsTargeted=${targeted} subs=${subs.length} title="${payload.title}"`,
+    );
+    if (!subs.length) {
+      this.logger.warn(
+        '[push] broadcast NO_SUBSCRIPTIONS — no shop owner has enabled push',
+      );
+      return { targeted, sent: 0, failed: 0, enabled: true };
+    }
+    const { sent, failed } = await this.sendToSubs(subs, payload, 'broadcast');
     return { targeted, sent, failed, enabled: true };
   }
 
   async notifyAdmins(payload: PushPayload): Promise<number> {
     if (!this.enabled) {
-      this.logger.warn('notifyAdmins skipped — VAPID not enabled');
+      this.logger.warn(
+        `[push] notifyAdmins SKIPPED (VAPID off) tag=${payload.tag ?? '-'} title="${payload.title}"`,
+      );
       return 0;
     }
     const subs = await this.subModel.find({ audience: 'ADMIN' }).exec();
-    const { sent } = await this.sendToSubs(subs, payload);
+    this.logger.log(
+      `[push] notifyAdmins subs=${subs.length} tag=${payload.tag ?? '-'} title="${payload.title}"`,
+    );
+    if (!subs.length) {
+      this.logger.warn(
+        '[push] notifyAdmins NO_SUBSCRIPTIONS — admin must click تفعيل الإشعارات on HTTPS/PWA',
+      );
+      return 0;
+    }
+    const { sent } = await this.sendToSubs(subs, payload, 'notifyAdmins');
     return sent;
+  }
+
+  /** Admin diagnostics: subscription counts + recent endpoints (no secrets). */
+  async debugStats(): Promise<PushDebugStats> {
+    const publicKey = this.getPublicKey();
+    const subject = (
+      this.config.get<string>('VAPID_SUBJECT') || 'mailto:admin@qet3etak.com'
+    ).trim();
+    const [all, admin, shopOwner, recent] = await Promise.all([
+      this.subModel.countDocuments().exec(),
+      this.subModel.countDocuments({ audience: 'ADMIN' }).exec(),
+      this.subModel.countDocuments({ audience: 'SHOP_OWNER' }).exec(),
+      this.subModel
+        .find()
+        .sort({ updatedAt: -1 })
+        .limit(20)
+        .select('audience userId endpoint updatedAt')
+        .lean()
+        .exec(),
+    ]);
+
+    this.logger.log(
+      `[push] debugStats enabled=${this.enabled} all=${all} admin=${admin} shopOwner=${shopOwner}`,
+    );
+
+    return {
+      enabled: this.enabled,
+      vapidPublicKeyPrefix: publicKey ? `${publicKey.slice(0, 12)}…` : '',
+      vapidSubject: subject,
+      totals: { all, admin, shopOwner },
+      recentEndpoints: recent.map((row) => {
+        const updatedAt = (row as { updatedAt?: Date }).updatedAt;
+        return {
+          audience: String(row.audience ?? ''),
+          userId: String(row.userId ?? ''),
+          endpointHost: this.endpointHost(String(row.endpoint ?? '')),
+          updatedAt:
+            updatedAt instanceof Date ? updatedAt.toISOString() : undefined,
+        };
+      }),
+    };
   }
 
   private async sendToSubs(
     subs: PushSubscriptionDocument[],
     payload: PushPayload,
+    source: string,
   ): Promise<{ sent: number; failed: number }> {
     if (!subs.length) {
-      this.logger.debug('No push subscriptions for payload');
+      this.logger.warn(`[push] ${source} send skipped — empty subscription list`);
       return { sent: 0, failed: 0 };
     }
 
-    // Angular ngsw expects { notification: { title, body, ... } }
-    // Icon paths must be absolute from the app origin (SW scope).
     const body = JSON.stringify({
       notification: {
         title: payload.title,
@@ -196,6 +306,7 @@ export class PushService implements OnModuleInit {
     let failed = 0;
     await Promise.all(
       subs.map(async (sub) => {
+        const host = this.endpointHost(sub.endpoint);
         try {
           await webpush.sendNotification(
             {
@@ -209,20 +320,36 @@ export class PushService implements OnModuleInit {
             },
           );
           sent += 1;
+          this.logger.log(
+            `[push] ${source} SENT userId=${String(sub.userId)} audience=${sub.audience} host=${host}`,
+          );
         } catch (err: unknown) {
           failed += 1;
           const status = (err as { statusCode?: number })?.statusCode;
           const message = (err as Error)?.message;
           this.logger.warn(
-            `Push failed (${status ?? 'err'}) ${message ?? ''} for ${sub.endpoint.slice(0, 48)}`,
+            `[push] ${source} FAIL status=${status ?? 'err'} host=${host} userId=${String(sub.userId)} msg=${message ?? ''}`,
           );
           if (status === 404 || status === 410) {
             await this.subModel.deleteOne({ _id: sub._id }).exec();
+            this.logger.warn(
+              `[push] removed stale subscription host=${host} status=${status}`,
+            );
           }
         }
       }),
     );
-    this.logger.log(`Push sent ${sent}/${subs.length}`);
+    this.logger.log(
+      `[push] ${source} summary sent=${sent} failed=${failed} total=${subs.length} tag=${payload.tag ?? '-'} title="${payload.title}"`,
+    );
     return { sent, failed };
+  }
+
+  private endpointHost(endpoint: string): string {
+    try {
+      return new URL(endpoint).host;
+    } catch {
+      return endpoint.slice(0, 40) || 'invalid';
+    }
   }
 }

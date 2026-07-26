@@ -55,6 +55,13 @@ export class User {
   @Prop({ trim: true })
   rejectionReason?: string;
 
+  /**
+   * Shop-specific catalog discount percent (0–100).
+   * Applied after volume tier pricing for this shop only.
+   */
+  @Prop({ type: Number, default: 0, min: 0, max: 100 })
+  shopDiscountPercent!: number;
+
   /** Hashed password for JWT login */
   @Prop({ required: true, select: false })
   passwordHash!: string;

@@ -1,8 +1,9 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { Model, Types } from 'mongoose';
 import { OrderStatus } from '../common/enums/order.enums';
 import { ExpenseCategory } from '../common/enums/financial.enums';
+import { ExpenseSource } from '../common/enums/hr.enums';
 import {
   normalizePagination,
   paginatedResult,
@@ -157,6 +158,26 @@ export class FinancialsService {
       amount: dto.amount,
       date: dto.date ? new Date(dto.date) : new Date(),
       description: dto.description?.trim() ?? '',
+      source: ExpenseSource.MANUAL,
+    });
+    return toView(expense);
+  }
+
+  async createPayrollExpense(input: {
+    employeeId: string;
+    payrollMonth: string;
+    amount: number;
+    description: string;
+    date?: Date;
+  }): Promise<Record<string, unknown>> {
+    const expense = await this.expenseModel.create({
+      category: ExpenseCategory.SALARIES,
+      amount: input.amount,
+      date: input.date ?? new Date(),
+      description: input.description,
+      source: ExpenseSource.PAYROLL,
+      employeeId: new Types.ObjectId(input.employeeId),
+      payrollMonth: input.payrollMonth,
     });
     return toView(expense);
   }
@@ -169,6 +190,7 @@ export class FinancialsService {
     const [items, total] = await Promise.all([
       this.expenseModel
         .find()
+        .populate('employeeId', 'fullName phone jobTitle')
         .sort({ date: -1 })
         .skip(p.skip)
         .limit(p.limit)
@@ -176,7 +198,19 @@ export class FinancialsService {
       this.expenseModel.countDocuments().exec(),
     ]);
     return paginatedResult(
-      items.map((e) => toView(e)),
+      items.map((e) => {
+        const view = toView(e);
+        const emp = e.employeeId as unknown as
+          | { fullName?: string; phone?: string; jobTitle?: string; _id?: unknown; id?: string }
+          | Types.ObjectId
+          | null
+          | undefined;
+        if (emp && typeof emp === 'object' && 'fullName' in emp) {
+          view['employeeName'] = emp.fullName ?? '';
+          view['employeeId'] = String(emp._id ?? emp.id ?? '');
+        }
+        return view;
+      }),
       total,
       p.page,
       p.limit,
@@ -187,6 +221,10 @@ export class FinancialsService {
     const res = await this.expenseModel.findByIdAndDelete(id).exec();
     if (!res) throw new NotFoundException('Expense not found');
     return { deleted: true };
+  }
+
+  async removeExpenseById(id: string): Promise<void> {
+    await this.expenseModel.findByIdAndDelete(id).exec();
   }
 
   /**
@@ -208,6 +246,7 @@ export class FinancialsService {
       description:
         dto.description?.trim() ||
         `تلف ${dto.quantity} وحدة من ${product.title}`,
+      source: ExpenseSource.MANUAL,
     });
     return {
       expense: toView(expense),

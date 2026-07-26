@@ -140,4 +140,47 @@ export class PushController {
       dto.shopIds,
     );
   }
+
+  @Get('admin/push/debug')
+  @ApiTags('Admin — Push')
+  @ApiBearerAuth('JWT')
+  @ApiOperation({
+    summary:
+      'Push diagnostics: VAPID status + subscription counts (for debugging)',
+  })
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @AdminOnly()
+  debug() {
+    return this.pushService.debugStats();
+  }
+
+  @Post('admin/push/test')
+  @ApiTags('Admin — Push')
+  @ApiBearerAuth('JWT')
+  @ApiOperation({
+    summary: 'Send a test push to all ADMIN subscriptions (and optionally self)',
+  })
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @AdminOnly()
+  async test(@CurrentUser() user: AuthUser) {
+    const title = 'اختبار إشعار الإدارة';
+    const body = 'رسالة تجريبية — إذا وصلتك فهذا يعني أن اشتراك الإدارة يعمل';
+    const toAdmins = await this.pushService.notifyAdmins({
+      title,
+      body,
+      url: '/reports',
+      tag: 'push-test-admin',
+    });
+    const toSelf = await this.pushService.notifyUser(user.userId, {
+      title: 'اختبار إشعار لك',
+      body: 'رسالة تجريبية مباشرة لحسابك',
+      url: '/reports',
+      tag: 'push-test-self',
+    });
+    return {
+      enabled: this.pushService.isEnabled(),
+      sentToAdmins: toAdmins,
+      sentToSelf: toSelf,
+    };
+  }
 }

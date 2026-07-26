@@ -3,12 +3,16 @@ import type { CorsOptions } from '@nestjs/common/interfaces/external/cors-option
 const DEFAULT_ORIGINS = [
   'http://localhost:4200',
   'http://localhost:4201',
+  'http://localhost:4202',
   'http://127.0.0.1:4200',
   'http://127.0.0.1:4201',
+  'http://127.0.0.1:4202',
   'https://qet3etak-shop-owner.vercel.app',
   'https://qet3etak-admin-dashboard.vercel.app',
+  'https://qet3etak-employee-portal.vercel.app',
   'https://qet3etak-shop-owner-aliahmedgomaas-projects.vercel.app',
   'https://qet3etak-admin-dashboard-aliahmedgomaas-projects.vercel.app',
+  'https://qet3etak-employee-portal-aliahmedgomaas-projects.vercel.app',
 ];
 
 function parseExtraOrigins(raw?: string): string[] {
@@ -21,20 +25,21 @@ function parseExtraOrigins(raw?: string): string[] {
 
 function isAllowedOrigin(origin: string, allowlist: string[]): boolean {
   if (allowlist.includes(origin)) return true;
-  // Preview deployments: https://qet3etak-shop-owner-<hash>-aliahmedgomaas-projects.vercel.app
+  // Preview deployments: https://qet3etak-*-<hash>-aliahmedgomaas-projects.vercel.app
   try {
     const host = new URL(origin).hostname;
     return (
       host.endsWith('.vercel.app') &&
       (host.includes('qet3etak-shop-owner') ||
-        host.includes('qet3etak-admin-dashboard'))
+        host.includes('qet3etak-admin-dashboard') ||
+        host.includes('qet3etak-employee-portal'))
     );
   } catch {
     return false;
   }
 }
 
-/** CORS for browser apps (shop + admin) calling this API. */
+/** CORS for browser apps (shop + admin + employee) calling this API. */
 export function buildCorsOptions(): CorsOptions {
   const allowlist = [
     ...DEFAULT_ORIGINS,

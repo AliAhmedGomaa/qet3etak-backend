@@ -29,6 +29,8 @@ import { ReportsModule } from './reports/reports.module';
 import { BranchesModule } from './branches/branches.module';
 import { RolesModule } from './roles/roles.module';
 import { RolesService } from './roles/roles.service';
+import { HrModule } from './hr/hr.module';
+import { BrandingModule } from './branding/branding.module';
 
 @Module({
   imports: [
@@ -58,6 +60,8 @@ import { RolesService } from './roles/roles.service';
     SpecialRequestsModule,
     PurchasingModule,
     FinancialsModule,
+    HrModule,
+    BrandingModule,
     ChatModule,
     DeliveryModule,
     InvoicesModule,

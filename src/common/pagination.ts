@@ -78,6 +78,14 @@ export class PaginatedStatusQueryDto extends PaginationQueryDto {
   @IsOptional()
   @IsString()
   roleId?: string;
+
+  @ApiPropertyOptional({
+    example: '664f1a2b3c4d5e6f7a8b9c0d',
+    description: 'Filter invoices by shop owner id (admin invoices list)',
+  })
+  @IsOptional()
+  @IsString()
+  shopId?: string;
 }
 
 export interface PaginatedResult<T> {

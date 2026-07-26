@@ -16,16 +16,18 @@ import { REQUIRE_APPROVED_KEY } from '../decorators/require-approved.decorator';
 export type AuthUser = {
   userId: string;
   phone: string;
-  /** Role code (system or custom). */
+  /** Role code (system, custom, or EMPLOYEE for portal). */
   role: UserRole | string;
   roleId?: string;
   /** From Role.adminPanel — custom roles can access admin when true. */
   adminPanel?: boolean;
-  status: UserStatus;
+  status: UserStatus | string;
   shopName?: string;
   fullName?: string;
   /** Set for BRANCH_MANAGER (and optionally other staff). */
   branchId?: string;
+  /** Distinguishes admin/shop User JWT from employee portal JWT. */
+  kind?: 'user' | 'employee';
 };
 
 @Injectable()
@@ -33,10 +35,9 @@ export class RolesGuard implements CanActivate {
   constructor(private readonly reflector: Reflector) {}
 
   canActivate(context: ExecutionContext): boolean {
-    const requiredRoles = this.reflector.getAllAndOverride<UserRole[]>(
-      ROLES_KEY,
-      [context.getHandler(), context.getClass()],
-    );
+    const requiredRoles = this.reflector.getAllAndOverride<
+      Array<UserRole | string>
+    >(ROLES_KEY, [context.getHandler(), context.getClass()]);
     const requireApproved = this.reflector.getAllAndOverride<boolean>(
       REQUIRE_APPROVED_KEY,
       [context.getHandler(), context.getClass()],
@@ -54,8 +55,9 @@ export class RolesGuard implements CanActivate {
         user.adminPanel,
       );
       const allowed =
-        requiredRoles.includes(user.role as UserRole) ||
-        requiredRoles.includes(effective as UserRole);
+        requiredRoles.includes(user.role) ||
+        requiredRoles.includes(effective as UserRole) ||
+        requiredRoles.includes(String(effective));
       if (!allowed) {
         throw new ForbiddenException('Insufficient role');
       }

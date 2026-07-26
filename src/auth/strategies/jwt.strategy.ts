@@ -1,11 +1,16 @@
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { InjectModel } from '@nestjs/mongoose';
 import { PassportStrategy } from '@nestjs/passport';
+import { Model } from 'mongoose';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 import {
   UserRole,
+  UserStatus,
   isAdminPanelRole,
 } from '../../common/enums/user.enums';
+import { EMPLOYEE_ROLE, EmployeeStatus } from '../../common/enums/hr.enums';
+import { Employee } from '../../hr/schemas/employee.schema';
 import { RolesService } from '../../roles/roles.service';
 import { UsersService } from '../../users/users.service';
 import { AuthUser } from '../guards/roles.guard';
@@ -13,6 +18,7 @@ import { AuthUser } from '../guards/roles.guard';
 type JwtPayload = {
   sub: string;
   phone: string;
+  kind?: 'user' | 'employee';
 };
 
 @Injectable()
@@ -21,6 +27,8 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     config: ConfigService,
     private readonly usersService: UsersService,
     private readonly rolesService: RolesService,
+    @InjectModel(Employee.name)
+    private readonly employeeModel: Model<Employee>,
   ) {
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
@@ -30,6 +38,24 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
   }
 
   async validate(payload: JwtPayload): Promise<AuthUser> {
+    if (payload.kind === 'employee') {
+      const emp = await this.employeeModel.findById(payload.sub).exec();
+      if (!emp) {
+        throw new UnauthorizedException('Employee no longer exists');
+      }
+      if (emp.status === EmployeeStatus.TERMINATED) {
+        throw new UnauthorizedException('Employee account is terminated');
+      }
+      return {
+        userId: String(emp._id),
+        phone: emp.phone,
+        role: EMPLOYEE_ROLE,
+        status: emp.status,
+        fullName: emp.fullName,
+        kind: 'employee',
+      };
+    }
+
     const user = await this.usersService.findById(payload.sub);
     if (!user) {
       throw new UnauthorizedException('User no longer exists');
@@ -46,10 +72,11 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       role: roleCode as UserRole,
       roleId: roleDoc ? String(roleDoc._id) : user.roleId ? String(user.roleId) : undefined,
       adminPanel,
-      status: user.status,
+      status: user.status as UserStatus,
       shopName: user.shopName,
       fullName: user.fullName,
       branchId: user.branchId ? String(user.branchId) : undefined,
+      kind: 'user',
     };
   }
 }

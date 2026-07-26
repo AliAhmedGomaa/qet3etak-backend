@@ -33,6 +33,7 @@ export type CreateUserInput = {
   status?: UserStatus;
   rejectionReason?: string;
   branchId?: string;
+  shopDiscountPercent?: number;
 };
 
 export type UpdateShopInput = {
@@ -46,6 +47,7 @@ export type UpdateShopInput = {
   status?: UserStatus;
   rejectionReason?: string;
   branchId?: string | null;
+  shopDiscountPercent?: number;
 };
 
 export type UpdateStaffInput = {
@@ -231,8 +233,31 @@ export class UsersService {
     } else if (data.rejectionReason !== undefined) {
       user.rejectionReason = data.rejectionReason.trim() || undefined;
     }
+    if (data.shopDiscountPercent !== undefined) {
+      const n = Number(data.shopDiscountPercent);
+      if (!Number.isFinite(n) || n < 0 || n > 100) {
+        throw new BadRequestException(
+          'shopDiscountPercent must be between 0 and 100',
+        );
+      }
+      user.shopDiscountPercent = Math.round(n * 100) / 100;
+    }
 
     return user.save();
+  }
+
+  /** Shop-only discount percent; 0 for non-shop / missing users. */
+  async getShopDiscountPercent(userId: string): Promise<number> {
+    if (!Types.ObjectId.isValid(userId)) return 0;
+    const user = await this.userModel
+      .findById(userId)
+      .select('role shopDiscountPercent')
+      .lean()
+      .exec();
+    if (!user || user.role !== UserRole.SHOP_OWNER) return 0;
+    const n = Number(user.shopDiscountPercent ?? 0);
+    if (!Number.isFinite(n) || n <= 0) return 0;
+    return Math.min(100, Math.round(n * 100) / 100);
   }
 
   async removeShop(id: string): Promise<void> {

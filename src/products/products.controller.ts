@@ -35,6 +35,8 @@ import {
 } from './dto/product.dto';
 import { ProductsService } from './products.service';
 import { examples } from '../swagger/examples';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import type { AuthUser } from '../auth/guards/roles.guard';
 
 const productImageUpload = FileInterceptor(
   'image',
@@ -56,8 +58,8 @@ export class ProductsController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @ShopOrAdmin()
   @RequireApproved()
-  catalog(@Query() query: CatalogQueryDto) {
-    return this.productsService.searchCatalog(query);
+  catalog(@CurrentUser() user: AuthUser, @Query() query: CatalogQueryDto) {
+    return this.productsService.searchCatalog(query, user.userId);
   }
 
   @Get('wholesale/catalog/facets')
@@ -89,8 +91,8 @@ export class ProductsController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @ShopOrAdmin()
   @RequireApproved()
-  calculateCart(@Body() dto: CalculateCartDto) {
-    return this.productsService.calculateCart(dto);
+  calculateCart(@CurrentUser() user: AuthUser, @Body() dto: CalculateCartDto) {
+    return this.productsService.calculateCart(dto, user.userId);
   }
 
   @Get('wholesale/products/:id/quote')
@@ -104,8 +106,16 @@ export class ProductsController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @ShopOrAdmin()
   @RequireApproved()
-  quote(@Param('id') id: string, @Query('quantity') quantity = '1') {
-    return this.productsService.quoteLine(id, Number(quantity) || 1);
+  quote(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Query('quantity') quantity = '1',
+  ) {
+    return this.productsService.quoteLine(
+      id,
+      Number(quantity) || 1,
+      user.userId,
+    );
   }
 
   @Get('wholesale/products/:id')
@@ -119,8 +129,8 @@ export class ProductsController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @ShopOrAdmin()
   @RequireApproved()
-  catalogProduct(@Param('id') id: string) {
-    return this.productsService.getCatalogProduct(id);
+  catalogProduct(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.productsService.getCatalogProduct(id, user.userId);
   }
 
   @Get('admin/products')

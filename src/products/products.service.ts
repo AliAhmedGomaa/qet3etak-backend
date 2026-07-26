@@ -14,13 +14,17 @@ import {
   type PaginatedResult,
 } from '../common/pagination';
 import { QualitiesService } from '../qualities/qualities.service';
+import { UsersService } from '../users/users.service';
 import {
   CalculateCartDto,
   CatalogQueryDto,
   CreateProductDto,
   UpdateProductDto,
 } from './dto/product.dto';
-import { buildDiscountMatrix, resolveUnitPrice } from './pricing.util';
+import {
+  resolveUnitPrice,
+  withShopCatalogPrices,
+} from './pricing.util';
 import { Product, ProductDocument } from './schemas/product.schema';
 import {
   buildPartFilter,
@@ -44,6 +48,7 @@ export class ProductsService implements OnModuleInit {
   constructor(
     @InjectModel(Product.name) private readonly productModel: Model<Product>,
     private readonly qualitiesService: QualitiesService,
+    private readonly usersService: UsersService,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -249,10 +254,13 @@ export class ProductsService implements OnModuleInit {
   /**
    * Aggregation: facet filters + smart free-text search (partial, synonyms, multi-token).
    */
-  async searchCatalog(query: CatalogQueryDto) {
+  async searchCatalog(query: CatalogQueryDto, shopUserId?: string) {
     const page = query.page ?? 1;
     const limit = Math.min(query.limit ?? 24, 100);
     const skip = (page - 1) * limit;
+    const shopDiscountPercent = shopUserId
+      ? await this.usersService.getShopDiscountPercent(shopUserId)
+      : 0;
 
     const match = this.buildCatalogMatch(query);
     const searchQ = query.q?.trim() ?? '';
@@ -301,19 +309,23 @@ export class ProductsService implements OnModuleInit {
     const [result] = await this.productModel.aggregate(pipeline).exec();
     const items = (result?.items ?? []).map(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (doc: any) => ({
-        ...doc,
-        id: String(doc._id),
-        _id: undefined,
-        imageUrl: absoluteMediaUrl(
-          typeof doc.imageUrl === 'string' ? doc.imageUrl : '',
-        ),
-        discountMatrix: buildDiscountMatrix(
+      (doc: any) => {
+        const priced = withShopCatalogPrices(
           doc.basePrice,
           doc.tieredPricing ?? [],
-        ),
-        stockLabel: this.stockLabel(doc.stockQuantity),
-      }),
+          shopDiscountPercent,
+        );
+        return {
+          ...doc,
+          id: String(doc._id),
+          _id: undefined,
+          imageUrl: absoluteMediaUrl(
+            typeof doc.imageUrl === 'string' ? doc.imageUrl : '',
+          ),
+          ...priced,
+          stockLabel: this.stockLabel(doc.stockQuantity),
+        };
+      },
     );
 
     const total = result?.totalCount?.[0]?.count ?? 0;
@@ -325,21 +337,30 @@ export class ProductsService implements OnModuleInit {
       total,
       totalPages: Math.max(1, Math.ceil(total / limit)),
       query: searchQ || undefined,
+      shopDiscountPercent,
     };
   }
 
   /** Single active product for the wholesale catalog detail page. */
-  async getCatalogProduct(id: string): Promise<Record<string, unknown>> {
+  async getCatalogProduct(
+    id: string,
+    shopUserId?: string,
+  ): Promise<Record<string, unknown>> {
     const product = await this.findDocumentById(id);
     if (!product.isActive) {
       throw new NotFoundException('Product not found');
     }
+    const shopDiscountPercent = shopUserId
+      ? await this.usersService.getShopDiscountPercent(shopUserId)
+      : 0;
+    const priced = withShopCatalogPrices(
+      product.basePrice,
+      product.tieredPricing ?? [],
+      shopDiscountPercent,
+    );
     return {
       ...this.toProductView(product),
-      discountMatrix: buildDiscountMatrix(
-        product.basePrice,
-        product.tieredPricing ?? [],
-      ),
+      ...priced,
       stockLabel: this.stockLabel(product.stockQuantity),
     };
   }
@@ -415,12 +436,16 @@ export class ProductsService implements OnModuleInit {
     return clauses.length === 1 ? clauses[0]! : { $and: clauses };
   }
 
-  async calculateCart(dto: CalculateCartDto) {
+  async calculateCart(dto: CalculateCartDto, shopUserId?: string) {
     const ids = dto.items.map((i) => i.productId);
     const invalid = ids.filter((id) => !Types.ObjectId.isValid(id));
     if (invalid.length) {
       throw new BadRequestException(`Invalid product ids: ${invalid.join(', ')}`);
     }
+
+    const shopDiscountPercent = shopUserId
+      ? await this.usersService.getShopDiscountPercent(shopUserId)
+      : 0;
 
     const products = await this.productModel
       .find({ _id: { $in: ids }, isActive: true })
@@ -441,17 +466,22 @@ export class ProductsService implements OnModuleInit {
         item.quantity,
         product.basePrice,
         product.tieredPricing ?? [],
+        shopDiscountPercent,
+      );
+      const catalog = withShopCatalogPrices(
+        product.basePrice,
+        product.tieredPricing ?? [],
+        shopDiscountPercent,
       );
       return {
         productId: item.productId,
         title: product.title,
         quantity: item.quantity,
-        basePrice: product.basePrice,
+        listPrice: catalog.listPrice,
+        basePrice: catalog.basePrice,
         ...pricing,
-        discountMatrix: buildDiscountMatrix(
-          product.basePrice,
-          product.tieredPricing ?? [],
-        ),
+        discountMatrix: catalog.discountMatrix,
+        shopDiscountPercent,
       };
     });
 
@@ -459,28 +489,40 @@ export class ProductsService implements OnModuleInit {
       lines.reduce((sum, line) => sum + line.lineTotal, 0).toFixed(2),
     );
 
-    return { lines, subtotal, currency: 'EGP' };
+    return { lines, subtotal, currency: 'EGP', shopDiscountPercent };
   }
 
   /** Instant single-line price quote for card +/- controls */
-  async quoteLine(productId: string, quantity: number) {
+  async quoteLine(
+    productId: string,
+    quantity: number,
+    shopUserId?: string,
+  ) {
     const product = await this.findDocumentById(productId);
     const qty = Math.max(1, Math.floor(quantity));
+    const shopDiscountPercent = shopUserId
+      ? await this.usersService.getShopDiscountPercent(shopUserId)
+      : 0;
     const pricing = resolveUnitPrice(
       qty,
       product.basePrice,
       product.tieredPricing ?? [],
+      shopDiscountPercent,
+    );
+    const catalog = withShopCatalogPrices(
+      product.basePrice,
+      product.tieredPricing ?? [],
+      shopDiscountPercent,
     );
     return {
       productId,
       quantity: qty,
-      basePrice: product.basePrice,
+      listPrice: catalog.listPrice,
+      basePrice: catalog.basePrice,
       stockQuantity: product.stockQuantity,
       ...pricing,
-      discountMatrix: buildDiscountMatrix(
-        product.basePrice,
-        product.tieredPricing ?? [],
-      ),
+      discountMatrix: catalog.discountMatrix,
+      shopDiscountPercent,
     };
   }
 

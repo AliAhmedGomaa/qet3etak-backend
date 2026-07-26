@@ -4,14 +4,18 @@ import {
   Injectable,
   UnauthorizedException,
 } from '@nestjs/common';
+import { InjectModel } from '@nestjs/mongoose';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
+import { Model } from 'mongoose';
 import {
   UserRole,
   UserStatus,
   isAdminPanelRole,
 } from '../common/enums/user.enums';
+import { EMPLOYEE_ROLE, EmployeeStatus } from '../common/enums/hr.enums';
 import { absoluteMediaUrl } from '../common/media-url';
+import { Employee } from '../hr/schemas/employee.schema';
 import { RolesService } from '../roles/roles.service';
 import { UserDocument } from '../users/schemas/user.schema';
 import { UsersService } from '../users/users.service';
@@ -24,6 +28,8 @@ export class AuthService {
     private readonly usersService: UsersService,
     private readonly rolesService: RolesService,
     private readonly jwtService: JwtService,
+    @InjectModel(Employee.name)
+    private readonly employeeModel: Model<Employee>,
   ) {}
 
   async registerShop(
@@ -85,6 +91,50 @@ export class AuthService {
     return this.tokenResponse(user);
   }
 
+  async loginEmployee(
+    dto: LoginDto,
+  ): Promise<{ accessToken: string; user: Record<string, unknown> }> {
+    const emp = await this.employeeModel
+      .findOne({ phone: dto.phone.trim() })
+      .select('+passwordHash')
+      .exec();
+    if (!emp?.passwordHash) {
+      throw new UnauthorizedException('Invalid phone or password');
+    }
+    const ok = await bcrypt.compare(dto.password, emp.passwordHash);
+    if (!ok) {
+      throw new UnauthorizedException('Invalid phone or password');
+    }
+    if (emp.status === EmployeeStatus.TERMINATED) {
+      throw new UnauthorizedException({
+        code: 'TERMINATED',
+        message: 'الحساب منتهي — تواصل مع الإدارة',
+      });
+    }
+    const payload = {
+      sub: String(emp._id),
+      phone: emp.phone,
+      kind: 'employee' as const,
+    };
+    const accessToken = this.jwtService.sign(payload);
+    const json = emp.toJSON() as unknown as Record<string, unknown>;
+    return {
+      accessToken,
+      user: {
+        ...json,
+        role: EMPLOYEE_ROLE,
+        kind: 'employee',
+      },
+    };
+  }
+
+  async employeeMe(employeeId: string): Promise<Record<string, unknown>> {
+    const emp = await this.employeeModel.findById(employeeId).exec();
+    if (!emp) throw new UnauthorizedException('Employee no longer exists');
+    const json = emp.toJSON() as unknown as Record<string, unknown>;
+    return { ...json, role: EMPLOYEE_ROLE, kind: 'employee' };
+  }
+
   async me(userId: string): Promise<Record<string, unknown>> {
     const user = await this.usersService.findByIdOrFail(userId);
     return this.toUserView(user);
@@ -94,7 +144,11 @@ export class AuthService {
     accessToken: string;
     user: Record<string, unknown>;
   }> {
-    const payload = { sub: String(user._id), phone: user.phone };
+    const payload = {
+      sub: String(user._id),
+      phone: user.phone,
+      kind: 'user' as const,
+    };
     const accessToken = this.jwtService.sign(payload);
     return {
       accessToken,

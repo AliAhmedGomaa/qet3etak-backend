@@ -1,13 +1,17 @@
-import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger';
+import { Type } from 'class-transformer';
 import {
   IsEnum,
+  IsNumber,
   IsOptional,
   IsString,
   Matches,
+  Max,
+  Min,
   MinLength,
   ValidateIf,
 } from 'class-validator';
 import { UserStatus } from '../../common/enums/user.enums';
+import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger';
 
 export class CreateAdminShopDto {
   @ApiProperty({ example: 'Ahmed Hassan' })
@@ -75,6 +79,17 @@ export class CreateAdminShopDto {
   @IsOptional()
   @IsString()
   branchId?: string;
+
+  @ApiPropertyOptional({
+    example: 5,
+    description: 'Shop-specific catalog discount percent (0–100)',
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  @Max(100)
+  shopDiscountPercent?: number;
 }
 
 export class UpdateAdminShopDto extends PartialType(CreateAdminShopDto) {

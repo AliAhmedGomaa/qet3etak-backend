@@ -122,6 +122,7 @@ export class AdminController {
           ? dto.rejectionReason?.trim()
           : undefined,
       branchId,
+      shopDiscountPercent: dto.shopDiscountPercent ?? 0,
     });
 
     if (status === UserStatus.APPROVED) {
@@ -175,6 +176,7 @@ export class AdminController {
           : dto.branchId === null || dto.branchId === ''
             ? null
             : dto.branchId,
+      shopDiscountPercent: dto.shopDiscountPercent,
     });
 
     if (dto.status === UserStatus.APPROVED) {

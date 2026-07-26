@@ -85,7 +85,8 @@ export class OrdersService {
 
   async checkout(shopUserId: string, dto: CheckoutDto): Promise<OrderDocument> {
     const shop = await this.usersService.findByIdOrFail(shopUserId);
-    const priced = await this.priceItems(dto.items);
+    const shopDiscountPercent = Number(shop.shopDiscountPercent ?? 0);
+    const priced = await this.priceItems(dto.items, shopDiscountPercent);
 
     if (dto.paymentMethod === PaymentMethod.CREDIT) {
       const wallet = await this.walletsService.ensureForShop(shopUserId);
@@ -201,7 +202,10 @@ export class OrdersService {
     dto: ReorderDto = {},
   ): Promise<ReorderResult> {
     const source = await this.getForShop(shopUserId, orderId);
-    const { items, warnings } = await this.resolveReorderItems(source);
+    const { items, warnings } = await this.resolveReorderItems(
+      source,
+      shopUserId,
+    );
 
     if (!items.length) {
       throw new BadRequestException({
@@ -229,12 +233,17 @@ export class OrdersService {
     };
   }
 
-  private async resolveReorderItems(source: OrderDocument): Promise<{
+  private async resolveReorderItems(
+    source: OrderDocument,
+    shopUserId: string,
+  ): Promise<{
     items: CheckoutDto['items'];
     warnings: ReorderWarning[];
   }> {
     const items: CheckoutDto['items'] = [];
     const warnings: ReorderWarning[] = [];
+    const shopDiscountPercent =
+      await this.usersService.getShopDiscountPercent(shopUserId);
 
     for (const line of source.items ?? []) {
       const productId = String(line.productId);
@@ -295,6 +304,7 @@ export class OrdersService {
         quantity,
         product.basePrice,
         product.tieredPricing ?? [],
+        shopDiscountPercent,
       );
       if (Number(line.unitPrice) !== Number(pricing.unitPrice)) {
         warnings.push({
@@ -439,7 +449,10 @@ export class OrdersService {
     }
   }
 
-  private async priceItems(items: CheckoutDto['items']) {
+  private async priceItems(
+    items: CheckoutDto['items'],
+    shopDiscountPercent = 0,
+  ) {
     const lines = [];
     for (const item of items) {
       if (!Types.ObjectId.isValid(item.productId)) {
@@ -460,6 +473,7 @@ export class OrdersService {
         item.quantity,
         product.basePrice,
         product.tieredPricing ?? [],
+        shopDiscountPercent,
       );
       lines.push({
         productId: product._id,

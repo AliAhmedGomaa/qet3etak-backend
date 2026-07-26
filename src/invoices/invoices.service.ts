@@ -183,12 +183,18 @@ export class InvoicesService {
     q?: string,
     status?: InvoiceStatus,
     branchScope?: string | null,
+    shopId?: string,
   ): Promise<PaginatedResult<InvoiceDocument>> {
     const p = normalizePagination(page, limit, 20);
+    const shopFilter =
+      shopId && Types.ObjectId.isValid(shopId)
+        ? { shopId: new Types.ObjectId(shopId) }
+        : {};
     const filter = withBranchFilter(
       {
         ...buildInvoiceSearchFilter(q),
         ...(status ? { status } : {}),
+        ...shopFilter,
       },
       branchScope ?? null,
     );

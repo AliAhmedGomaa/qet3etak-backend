@@ -99,6 +99,7 @@ export class InvoicesController {
       query.q,
       status,
       scope,
+      query.shopId,
     );
   }
 

@@ -7,14 +7,30 @@ export type UnitPriceResult = {
   isTiered: boolean;
 };
 
+/** Clamp to 0–100 with at most 2 decimal places. */
+export function clampShopDiscountPercent(value: unknown): number {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return Math.min(100, Math.round(n * 100) / 100);
+}
+
+/** Apply a shop-level percent discount to a money amount. */
+export function applyShopDiscount(amount: number, percent: number): number {
+  const p = clampShopDiscountPercent(percent);
+  if (p <= 0) return Number(Number(amount).toFixed(2));
+  return Number((Number(amount) * (1 - p / 100)).toFixed(2));
+}
+
 /**
  * Evaluates quantity against sorted tieredPricing rules.
  * Highest matching minQty wins; otherwise basePrice.
+ * Optional shopDiscountPercent is applied after the tier is chosen.
  */
 export function resolveUnitPrice(
   quantity: number,
   basePrice: number,
   tieredPricing: TieredPrice[] = [],
+  shopDiscountPercent = 0,
 ): UnitPriceResult {
   const qty = Math.max(0, Math.floor(quantity));
   const tiers = [...tieredPricing].sort((a, b) => a.minQty - b.minQty);
@@ -26,11 +42,14 @@ export function resolveUnitPrice(
     }
   }
 
-  const isTiered = tiers.some((t) => t.minQty === applied.minQty) && applied.price !== basePrice;
+  const isTiered =
+    tiers.some((t) => t.minQty === applied.minQty) &&
+    applied.price !== basePrice;
+  const unitPrice = applyShopDiscount(applied.price, shopDiscountPercent);
 
   return {
-    unitPrice: applied.price,
-    lineTotal: Number((applied.price * qty).toFixed(2)),
+    unitPrice,
+    lineTotal: Number((unitPrice * qty).toFixed(2)),
     appliedMinQty: applied.minQty,
     isTiered,
   };
@@ -40,10 +59,18 @@ export function resolveUnitPrice(
 export function buildDiscountMatrix(
   basePrice: number,
   tieredPricing: TieredPrice[] = [],
+  shopDiscountPercent = 0,
 ): Array<{ label: string; minQty: number; maxQty: number | null; price: number }> {
   const tiers = [...tieredPricing].sort((a, b) => a.minQty - b.minQty);
   if (!tiers.length) {
-    return [{ label: '1+', minQty: 1, maxQty: null, price: basePrice }];
+    return [
+      {
+        label: '1+',
+        minQty: 1,
+        maxQty: null,
+        price: applyShopDiscount(basePrice, shopDiscountPercent),
+      },
+    ];
   }
 
   const rows: Array<{
@@ -59,7 +86,7 @@ export function buildDiscountMatrix(
       label: `1–${firstMin - 1}`,
       minQty: 1,
       maxQty: firstMin - 1,
-      price: basePrice,
+      price: applyShopDiscount(basePrice, shopDiscountPercent),
     });
   }
 
@@ -77,9 +104,29 @@ export function buildDiscountMatrix(
       label,
       minQty: current.minQty,
       maxQty,
-      price: current.price,
+      price: applyShopDiscount(current.price, shopDiscountPercent),
     });
   }
 
   return rows;
+}
+
+/** Discounted catalog prices for a specific shop (keeps listPrice = original). */
+export function withShopCatalogPrices(
+  basePrice: number,
+  tieredPricing: TieredPrice[] = [],
+  shopDiscountPercent = 0,
+) {
+  const percent = clampShopDiscountPercent(shopDiscountPercent);
+  const discountedTiers = (tieredPricing ?? []).map((t) => ({
+    minQty: t.minQty,
+    price: applyShopDiscount(t.price, percent),
+  }));
+  return {
+    listPrice: basePrice,
+    basePrice: applyShopDiscount(basePrice, percent),
+    tieredPricing: discountedTiers,
+    shopDiscountPercent: percent,
+    discountMatrix: buildDiscountMatrix(basePrice, tieredPricing, percent),
+  };
 }

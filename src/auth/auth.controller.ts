@@ -92,6 +92,13 @@ export class AuthController {
     return this.authService.login(dto);
   }
 
+  @Post('employee/login')
+  @ApiOperation({ summary: 'Employee portal login' })
+  @ApiBody({ type: LoginDto })
+  loginEmployee(@Body() dto: LoginDto) {
+    return this.authService.loginEmployee(dto);
+  }
+
   @Get('me')
   @ApiBearerAuth('JWT')
   @ApiOperation({ summary: 'Current authenticated user' })
@@ -101,6 +108,9 @@ export class AuthController {
   })
   @UseGuards(JwtAuthGuard)
   me(@CurrentUser() user: AuthUser) {
+    if (user.kind === 'employee') {
+      return this.authService.employeeMe(user.userId);
+    }
     return this.authService.me(user.userId);
   }
 }
