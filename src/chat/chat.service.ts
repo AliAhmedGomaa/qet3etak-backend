@@ -73,57 +73,62 @@ export class ChatService {
       .exec();
 
     const messageView = view(message);
-    this.emitMessage(input.shopId, messageView);
-    if (conversation) this.emitConversation(input.shopId, view(conversation));
 
-    // Notify the offline side via web-push (fire-and-forget).
+    // Push first (must complete before the HTTP response on Vercel).
     const shopName =
       (conversation?.shopName as string) || input.shopName || 'متجر';
-    void this.pushToOfflineSide(input, shopName, text);
+    await this.pushToRecipient(input, shopName, text);
+
+    // Realtime fan-out is best-effort (Socket.IO is flaky on serverless).
+    try {
+      this.emitMessage(input.shopId, messageView);
+      if (conversation) this.emitConversation(input.shopId, view(conversation));
+    } catch (err) {
+      this.logger.warn(
+        `Chat socket emit failed: ${(err as Error).message}`,
+      );
+    }
 
     return messageView;
   }
 
   /**
-   * Send a push notification to the recipient only if they have no active
-   * socket connection (i.e. the app/tab is closed) so we never double-notify.
+   * Always send a web-push to the recipient side.
+   * (Presence-based suppression is unreliable on serverless Socket.IO.)
    */
-  private async pushToOfflineSide(
+  private async pushToRecipient(
     input: SendMessageInput,
     shopName: string,
     text: string,
   ): Promise<void> {
     try {
       const preview = text.length > 120 ? `${text.slice(0, 117)}…` : text;
+      const tag = `chat-${input.shopId}-${Date.now()}`;
 
       if (input.senderRole === UserRole.SHOP_OWNER) {
-        // Skip the push only if an admin is actively viewing this thread.
-        if (await this.roomHasSockets(adminViewRoom(input.shopId))) return;
-        await this.pushService.notifyAdmins({
+        const sent = await this.pushService.notifyAdmins({
           title: `رسالة من ${shopName}`,
           body: preview,
           url: '/chat',
-          tag: `chat-${input.shopId}`,
+          tag,
         });
+        this.logger.log(
+          `[chat] push to admins shopId=${input.shopId} sent=${sent}`,
+        );
       } else {
-        // Skip the push only if the shop owner is actively viewing the thread.
-        if (await this.roomHasSockets(shopViewRoom(input.shopId))) return;
-        await this.pushService.notifyUser(input.shopId, {
+        const sent = await this.pushService.notifyUser(input.shopId, {
           title: 'دعم قطع الغيار',
           body: preview,
           url: '/support',
-          tag: 'chat-support',
+          tag,
         });
+        this.logger.log(
+          `[chat] push to shop shopId=${input.shopId} sent=${sent}`,
+        );
       }
     } catch (err) {
       this.logger.warn(`Chat push failed: ${(err as Error).message}`);
     }
-  }
-
-  private async roomHasSockets(room: string): Promise<boolean> {
-    if (!this.server) return false;
-    const sockets = await this.server.in(room).fetchSockets();
-    return sockets.length > 0;
   }
 
   async getMessages(shopId: string): Promise<Record<string, unknown>[]> {

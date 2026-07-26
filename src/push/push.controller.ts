@@ -56,11 +56,78 @@ export class PushController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.SHOP_OWNER)
   @RequireApproved()
-  subscribe(
+  async subscribe(
     @CurrentUser() user: AuthUser,
     @Body() dto: SavePushSubscriptionDto,
   ) {
-    return this.pushService.saveSubscription(user.userId, dto, 'SHOP_OWNER');
+    const sub = await this.pushService.saveSubscription(
+      user.userId,
+      dto,
+      'SHOP_OWNER',
+    );
+    // Payload-less tickle first (isolates encryption issues), then a real payload.
+    const tickleSent = await this.pushService.tickleUser(user.userId);
+    const confirmationSent = await this.pushService.notifyUser(user.userId, {
+      title: 'تم تفعيل الإشعارات',
+      body: 'إذا رأيت هذا، فإشعارات المتجر تعمل',
+      url: '/home',
+      tag: `push-welcome-${Date.now()}`,
+    });
+    return {
+      id: String(sub._id),
+      tickleSent,
+      confirmationSent,
+      keyLens: {
+        p256dh: dto.keys.p256dh?.length ?? 0,
+        auth: dto.keys.auth?.length ?? 0,
+      },
+    };
+  }
+
+  @Post('wholesale/push/test')
+  @ApiTags('Wholesale — Push')
+  @ApiBearerAuth('JWT')
+  @ApiOperation({ summary: 'Send a test push to the current shop owner' })
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.SHOP_OWNER)
+  @RequireApproved()
+  async testShop(@CurrentUser() user: AuthUser) {
+    const sent = await this.pushService.notifyUser(user.userId, {
+      title: 'اختبار إشعار المتجر',
+      body: 'رسالة تجريبية — إذا وصلتك فالاشتراك يعمل',
+      url: '/home',
+      tag: `push-test-shop-${Date.now()}`,
+    });
+    return { enabled: this.pushService.isEnabled(), sent };
+  }
+
+  @Get('wholesale/push/inbox')
+  @ApiTags('Wholesale — Push')
+  @ApiBearerAuth('JWT')
+  @ApiOperation({ summary: 'Unread in-app notification inbox (shop)' })
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.SHOP_OWNER)
+  @RequireApproved()
+  inboxShop(@CurrentUser() user: AuthUser) {
+    return this.pushService.listUnreadInbox(user.userId);
+  }
+
+  @Post('wholesale/push/inbox/read')
+  @ApiTags('Wholesale — Push')
+  @ApiBearerAuth('JWT')
+  @ApiOperation({ summary: 'Mark shop inbox notifications as read' })
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.SHOP_OWNER)
+  @RequireApproved()
+  async inboxShopRead(
+    @CurrentUser() user: AuthUser,
+    @Body() body: { ids?: string[] },
+  ) {
+    const modified = await this.pushService.markInboxRead(
+      user.userId,
+      body?.ids,
+    );
+    return { modified };
   }
 
   @Delete('wholesale/push/subscribe')
@@ -91,11 +158,31 @@ export class PushController {
   })
   @UseGuards(JwtAuthGuard, RolesGuard)
   @AdminOnly()
-  subscribeAdmin(
+  async subscribeAdmin(
     @CurrentUser() user: AuthUser,
     @Body() dto: SavePushSubscriptionDto,
   ) {
-    return this.pushService.saveSubscription(user.userId, dto, 'ADMIN');
+    const sub = await this.pushService.saveSubscription(
+      user.userId,
+      dto,
+      'ADMIN',
+    );
+    const tickleSent = await this.pushService.tickleUser(user.userId);
+    const confirmationSent = await this.pushService.notifyUser(user.userId, {
+      title: 'تم تفعيل إشعارات الإدارة',
+      body: 'إذا رأيت هذا، فإشعارات لوحة التحكم تعمل',
+      url: '/reports',
+      tag: `push-welcome-admin-${Date.now()}`,
+    });
+    return {
+      id: String(sub._id),
+      tickleSent,
+      confirmationSent,
+      keyLens: {
+        p256dh: dto.keys.p256dh?.length ?? 0,
+        auth: dto.keys.auth?.length ?? 0,
+      },
+    };
   }
 
   @Delete('admin/push/subscribe')
@@ -152,6 +239,33 @@ export class PushController {
   @AdminOnly()
   debug() {
     return this.pushService.debugStats();
+  }
+
+  @Get('admin/push/inbox')
+  @ApiTags('Admin — Push')
+  @ApiBearerAuth('JWT')
+  @ApiOperation({ summary: 'Unread in-app notification inbox (admin)' })
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @AdminOnly()
+  inboxAdmin(@CurrentUser() user: AuthUser) {
+    return this.pushService.listUnreadInbox(user.userId);
+  }
+
+  @Post('admin/push/inbox/read')
+  @ApiTags('Admin — Push')
+  @ApiBearerAuth('JWT')
+  @ApiOperation({ summary: 'Mark admin inbox notifications as read' })
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @AdminOnly()
+  async inboxAdminRead(
+    @CurrentUser() user: AuthUser,
+    @Body() body: { ids?: string[] },
+  ) {
+    const modified = await this.pushService.markInboxRead(
+      user.userId,
+      body?.ids,
+    );
+    return { modified };
   }
 
   @Post('admin/push/test')

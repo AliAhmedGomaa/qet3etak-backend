@@ -5,6 +5,10 @@ import {
   PushSubscriptionEntity,
   PushSubscriptionSchema,
 } from './schemas/push-subscription.schema';
+import {
+  AppNotification,
+  AppNotificationSchema,
+} from './schemas/app-notification.schema';
 import { PushController } from './push.controller';
 import { PushService } from './push.service';
 
@@ -13,6 +17,7 @@ import { PushService } from './push.service';
     UsersModule,
     MongooseModule.forFeature([
       { name: PushSubscriptionEntity.name, schema: PushSubscriptionSchema },
+      { name: AppNotification.name, schema: AppNotificationSchema },
     ]),
   ],
   controllers: [PushController],

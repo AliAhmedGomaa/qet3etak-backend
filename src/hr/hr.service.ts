@@ -343,11 +343,11 @@ export class HrService {
       status: VacationStatus.PENDING,
       reason: dto.reason?.trim() || '',
     });
-    void this.pushService.notifyAdmins({
+    await this.pushService.notifyAdmins({
       title: 'طلب إجازة جديد',
       body: `${emp.fullName} — ${days} يوم`,
       url: '/employees/vacations',
-      tag: 'vacation-pending',
+      tag: `vacation-pending-${Date.now()}`,
     });
     return toView(doc);
   }
