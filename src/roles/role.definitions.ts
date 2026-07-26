@@ -1,4 +1,10 @@
 import { UserRole } from '../common/enums/user.enums';
+import {
+  ADMIN_PERMISSIONS,
+  BRANCH_MANAGER_PERMISSIONS,
+  MANAGER_PERMISSIONS,
+  OPS_PERMISSIONS,
+} from '../common/permissions';
 
 export type SystemRoleSeed = {
   code: UserRole;
@@ -15,21 +21,22 @@ export const SYSTEM_ROLE_SEEDS: SystemRoleSeed[] = [
     name: 'مدير النظام',
     description: 'صلاحيات كاملة بما في ذلك إدارة المستخدمين والأدوار',
     adminPanel: true,
-    permissions: ['admin.panel', 'admin.users', 'admin.roles', 'admin.branches'],
+    permissions: ADMIN_PERMISSIONS,
   },
   {
     code: UserRole.MANAGER,
     name: 'مدير عمليات',
-    description: 'وصول كامل للوحة الإدارة',
+    description:
+      'عمليات اللوحة + عرض/تعديل المستخدمين بدون إضافة أو حذف (قابل للتخصيص من الأدوار)',
     adminPanel: true,
-    permissions: ['admin.panel'],
+    permissions: MANAGER_PERMISSIONS,
   },
   {
     code: UserRole.STAFF,
     name: 'موظف',
-    description: 'وصول كامل للوحة الإدارة للعمليات اليومية',
+    description: 'عمليات يومية في اللوحة بدون إدارة المستخدمين/الأدوار/الفروع',
     adminPanel: true,
-    permissions: ['admin.panel'],
+    permissions: OPS_PERMISSIONS,
   },
   {
     code: UserRole.BRANCH_MANAGER,
@@ -37,7 +44,7 @@ export const SYSTEM_ROLE_SEEDS: SystemRoleSeed[] = [
     description:
       'عرض وإدارة بيانات فرعه فقط (متاجر، طلبات، تقارير، مالية، مرتجعات، فواتير)',
     adminPanel: true,
-    permissions: ['admin.panel', 'admin.branch_scoped'],
+    permissions: BRANCH_MANAGER_PERMISSIONS,
   },
   {
     code: UserRole.SHOP_OWNER,

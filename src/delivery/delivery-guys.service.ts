@@ -4,6 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
+import * as bcrypt from 'bcrypt';
 import { Model } from 'mongoose';
 import {
   DeliveryFeeModel,
@@ -37,9 +38,11 @@ export class DeliveryGuysService {
     if (exists) {
       throw new ConflictException('A delivery guy with this phone already exists');
     }
+    const passwordHash = await bcrypt.hash(dto.password, 10);
     return this.guyModel.create({
       fullName: dto.fullName.trim(),
       phone,
+      passwordHash,
       city: dto.city?.trim() || '',
       vehicleType: dto.vehicleType?.trim() || '',
       notes: dto.notes?.trim() || '',
@@ -58,11 +61,13 @@ export class DeliveryGuysService {
     page?: number,
     limit?: number,
     q?: string,
-    status?: DeliveryGuyStatus,
+    status: DeliveryGuyStatus | 'ALL' = DeliveryGuyStatus.ACTIVE,
   ): Promise<PaginatedResult<DeliveryGuyDocument>> {
     const p = normalizePagination(page, limit, 20);
     const filter: Record<string, unknown> = {};
-    if (status) filter['status'] = status;
+    if (status !== 'ALL') {
+      filter['status'] = status;
+    }
     if (q?.trim()) {
       const rx = new RegExp(q.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
       filter['$or'] = [{ fullName: rx }, { phone: rx }, { city: rx }];
@@ -111,6 +116,9 @@ export class DeliveryGuysService {
     if (dto.percentRate !== undefined) guy.percentRate = dto.percentRate;
     if (dto.baseFee !== undefined) guy.baseFee = dto.baseFee;
     if (dto.perItemFee !== undefined) guy.perItemFee = dto.perItemFee;
+    if (dto.password?.trim()) {
+      guy.passwordHash = await bcrypt.hash(dto.password.trim(), 10);
+    }
     await guy.save();
     return guy;
   }

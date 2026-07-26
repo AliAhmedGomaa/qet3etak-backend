@@ -40,6 +40,8 @@ export type PushDebugStats = {
     all: number;
     admin: number;
     shopOwner: number;
+    employee: number;
+    delivery: number;
   };
   recentEndpoints: Array<{
     audience: string;
@@ -107,7 +109,7 @@ export class PushService implements OnModuleInit {
       endpoint: string;
       keys: { p256dh: string; auth: string };
     },
-    audience: 'SHOP_OWNER' | 'ADMIN' = 'SHOP_OWNER',
+    audience: 'SHOP_OWNER' | 'ADMIN' | 'EMPLOYEE' | 'DELIVERY' = 'SHOP_OWNER',
   ): Promise<PushSubscriptionDocument> {
     const host = this.endpointHost(subscription.endpoint);
     const p256dh = this.normalizeKey(subscription.keys?.p256dh);
@@ -191,8 +193,14 @@ export class PushService implements OnModuleInit {
     );
   }
 
-  async notifyUser(userId: string, payload: PushPayload): Promise<number> {
-    await this.enqueueForUsers([userId], payload);
+  async notifyUser(
+    userId: string,
+    payload: PushPayload,
+    opts?: { skipInbox?: boolean },
+  ): Promise<number> {
+    if (!opts?.skipInbox) {
+      await this.enqueueForUsers([userId], payload);
+    }
     if (!this.enabled) {
       this.logger.warn(
         `[push] notifyUser SKIPPED (VAPID off) userId=${userId} tag=${payload.tag ?? '-'} title="${payload.title}"`,
@@ -207,7 +215,7 @@ export class PushService implements OnModuleInit {
     );
     if (!subs.length) {
       this.logger.warn(
-        `[push] notifyUser NO_SUBSCRIPTIONS userId=${userId} — inbox still queued for polling`,
+        `[push] notifyUser NO_SUBSCRIPTIONS userId=${userId}${opts?.skipInbox ? '' : ' — inbox still queued for polling'}`,
       );
       return 0;
     }
@@ -425,28 +433,31 @@ export class PushService implements OnModuleInit {
     const subject = (
       this.config.get<string>('VAPID_SUBJECT') || 'mailto:admin@qet3etak.com'
     ).trim();
-    const [all, admin, shopOwner, recent] = await Promise.all([
-      this.subModel.countDocuments().exec(),
-      this.subModel.countDocuments({ audience: 'ADMIN' }).exec(),
-      this.subModel.countDocuments({ audience: 'SHOP_OWNER' }).exec(),
-      this.subModel
-        .find()
-        .sort({ updatedAt: -1 })
-        .limit(20)
-        .select('audience userId endpoint updatedAt keys')
-        .lean()
-        .exec(),
-    ]);
+    const [all, admin, shopOwner, employee, delivery, recent] =
+      await Promise.all([
+        this.subModel.countDocuments().exec(),
+        this.subModel.countDocuments({ audience: 'ADMIN' }).exec(),
+        this.subModel.countDocuments({ audience: 'SHOP_OWNER' }).exec(),
+        this.subModel.countDocuments({ audience: 'EMPLOYEE' }).exec(),
+        this.subModel.countDocuments({ audience: 'DELIVERY' }).exec(),
+        this.subModel
+          .find()
+          .sort({ updatedAt: -1 })
+          .limit(20)
+          .select('audience userId endpoint updatedAt keys')
+          .lean()
+          .exec(),
+      ]);
 
     this.logger.log(
-      `[push] debugStats enabled=${this.enabled} all=${all} admin=${admin} shopOwner=${shopOwner}`,
+      `[push] debugStats enabled=${this.enabled} all=${all} admin=${admin} shopOwner=${shopOwner} employee=${employee} delivery=${delivery}`,
     );
 
     return {
       enabled: this.enabled,
       vapidPublicKeyPrefix: publicKey ? `${publicKey.slice(0, 12)}…` : '',
       vapidSubject: subject,
-      totals: { all, admin, shopOwner },
+      totals: { all, admin, shopOwner, employee, delivery },
       recentEndpoints: recent.map((row) => {
         const updatedAt = (row as { updatedAt?: Date }).updatedAt;
         const keys = (row as { keys?: { p256dh?: string; auth?: string } }).keys;

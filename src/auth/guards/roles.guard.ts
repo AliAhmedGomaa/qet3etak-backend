@@ -26,8 +26,10 @@ export type AuthUser = {
   fullName?: string;
   /** Set for BRANCH_MANAGER (and optionally other staff). */
   branchId?: string;
-  /** Distinguishes admin/shop User JWT from employee portal JWT. */
-  kind?: 'user' | 'employee';
+  /** Distinguishes admin/shop User JWT from employee / delivery portal JWTs. */
+  kind?: 'user' | 'employee' | 'delivery';
+  /** Fine-grained permission keys from the user's Role document. */
+  permissions?: string[];
 };
 
 @Injectable()

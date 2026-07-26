@@ -20,9 +20,11 @@ import {
 import * as bcrypt from 'bcrypt';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { UnscopedAdminOnly } from '../auth/decorators/admin-only.decorator';
+import { RequirePermissions } from '../auth/decorators/require-permissions.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import type { AuthUser } from '../auth/guards/roles.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
+import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import {
   UserRole,
   UserStatus,
@@ -38,7 +40,7 @@ import {
 @ApiTags('Admin — Users & Roles')
 @ApiBearerAuth('JWT')
 @Controller('admin')
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
 @UnscopedAdminOnly()
 export class AdminUsersController {
   constructor(
@@ -47,6 +49,7 @@ export class AdminUsersController {
   ) {}
 
   @Get('users')
+  @RequirePermissions('users.read')
   @ApiOperation({
     summary: 'List admin-panel staff users (excludes shop owners)',
   })
@@ -84,6 +87,7 @@ export class AdminUsersController {
   }
 
   @Post('users')
+  @RequirePermissions('users.create')
   @ApiOperation({ summary: 'Create an admin-panel staff user' })
   async createUser(
     @CurrentUser() actor: AuthUser,
@@ -122,6 +126,7 @@ export class AdminUsersController {
   }
 
   @Get('users/:id')
+  @RequirePermissions('users.read')
   @ApiOperation({ summary: 'Get an admin-panel staff user by id' })
   async getUser(@Param('id') id: string) {
     const user = await this.usersService.findStaffByIdOrFail(id);
@@ -129,6 +134,7 @@ export class AdminUsersController {
   }
 
   @Patch('users/:id')
+  @RequirePermissions('users.update')
   @ApiOperation({
     summary: 'Update staff profile, role, password, or active status',
   })
@@ -171,6 +177,7 @@ export class AdminUsersController {
   }
 
   @Delete('users/:id')
+  @RequirePermissions('users.delete')
   @ApiOperation({
     summary: 'Delete a staff user (blocked if they are the last active ADMIN)',
   })

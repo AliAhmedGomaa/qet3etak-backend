@@ -99,6 +99,13 @@ export class AuthController {
     return this.authService.loginEmployee(dto);
   }
 
+  @Post('delivery/login')
+  @ApiOperation({ summary: 'Delivery portal login' })
+  @ApiBody({ type: LoginDto })
+  loginDelivery(@Body() dto: LoginDto) {
+    return this.authService.loginDelivery(dto);
+  }
+
   @Get('me')
   @ApiBearerAuth('JWT')
   @ApiOperation({ summary: 'Current authenticated user' })
@@ -110,6 +117,9 @@ export class AuthController {
   me(@CurrentUser() user: AuthUser) {
     if (user.kind === 'employee') {
       return this.authService.employeeMe(user.userId);
+    }
+    if (user.kind === 'delivery') {
+      return this.authService.deliveryMe(user.userId);
     }
     return this.authService.me(user.userId);
   }

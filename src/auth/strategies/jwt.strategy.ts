@@ -10,6 +10,11 @@ import {
   isAdminPanelRole,
 } from '../../common/enums/user.enums';
 import { EMPLOYEE_ROLE, EmployeeStatus } from '../../common/enums/hr.enums';
+import {
+  DELIVERY_ROLE,
+  DeliveryGuyStatus,
+} from '../../common/enums/delivery.enums';
+import { DeliveryGuy } from '../../delivery/schemas/delivery-guy.schema';
 import { Employee } from '../../hr/schemas/employee.schema';
 import { RolesService } from '../../roles/roles.service';
 import { UsersService } from '../../users/users.service';
@@ -18,7 +23,7 @@ import { AuthUser } from '../guards/roles.guard';
 type JwtPayload = {
   sub: string;
   phone: string;
-  kind?: 'user' | 'employee';
+  kind?: 'user' | 'employee' | 'delivery';
 };
 
 @Injectable()
@@ -29,6 +34,8 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     private readonly rolesService: RolesService,
     @InjectModel(Employee.name)
     private readonly employeeModel: Model<Employee>,
+    @InjectModel(DeliveryGuy.name)
+    private readonly deliveryGuyModel: Model<DeliveryGuy>,
   ) {
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
@@ -56,6 +63,24 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       };
     }
 
+    if (payload.kind === 'delivery') {
+      const guy = await this.deliveryGuyModel.findById(payload.sub).exec();
+      if (!guy) {
+        throw new UnauthorizedException('Delivery guy no longer exists');
+      }
+      if (guy.status !== DeliveryGuyStatus.ACTIVE) {
+        throw new UnauthorizedException('Delivery account is inactive');
+      }
+      return {
+        userId: String(guy._id),
+        phone: guy.phone,
+        role: DELIVERY_ROLE,
+        status: guy.status,
+        fullName: guy.fullName,
+        kind: 'delivery',
+      };
+    }
+
     const user = await this.usersService.findById(payload.sub);
     if (!user) {
       throw new UnauthorizedException('User no longer exists');
@@ -77,6 +102,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       fullName: user.fullName,
       branchId: user.branchId ? String(user.branchId) : undefined,
       kind: 'user',
+      permissions: roleDoc?.permissions ?? [],
     };
   }
 }

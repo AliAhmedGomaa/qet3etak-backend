@@ -15,6 +15,10 @@ export class DeliveryGuy {
   @Prop({ required: true, trim: true, unique: true, index: true })
   phone!: string;
 
+  /** Login password for the delivery portal (select: false by default). */
+  @Prop({ select: false })
+  passwordHash?: string;
+
   @Prop({ trim: true, default: '' })
   city!: string;
 
@@ -71,6 +75,7 @@ DeliveryGuySchema.set('toJSON', {
     ret.id = ret._id;
     delete ret._id;
     delete ret.__v;
+    delete ret.passwordHash;
     return ret;
   },
 });

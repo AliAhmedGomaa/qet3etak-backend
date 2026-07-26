@@ -16,9 +16,10 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { UserRole } from '../common/enums/user.enums';
-import { PaginationQueryDto } from '../common/pagination';
+import { PaginationQueryDto, DeliveryOrdersQueryDto } from '../common/pagination';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { AdminOnly } from '../auth/decorators/admin-only.decorator';
+import { DeliveryOnly } from '../auth/decorators/delivery-only.decorator';
 import { RequireApproved } from '../auth/decorators/require-approved.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -152,5 +153,69 @@ export class OrdersController {
     @Body() dto: AssignOrderDeliveryDto,
   ) {
     return this.ordersService.assignDelivery(id, dto);
+  }
+
+  @Get('delivery/orders')
+  @ApiTags('Delivery — Orders')
+  @ApiOperation({ summary: 'List orders assigned to the current courier' })
+  @DeliveryOnly()
+  listDeliveryOrders(
+    @CurrentUser() user: AuthUser,
+    @Query() query: DeliveryOrdersQueryDto,
+  ) {
+    const tab =
+      query.tab === 'delivered' || query.tab === 'all' || query.tab === 'active'
+        ? query.tab
+        : 'active';
+    return this.ordersService.listForDeliveryGuy(
+      user.userId,
+      query.page,
+      query.limit,
+      tab,
+    );
+  }
+
+  @Get('delivery/orders/:id')
+  @ApiTags('Delivery — Orders')
+  @ApiOperation({ summary: 'Get one assigned order' })
+  @DeliveryOnly()
+  getDeliveryOrder(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.ordersService.getForDeliveryGuy(user.userId, id);
+  }
+
+  @Patch('delivery/orders/:id/deliver')
+  @ApiTags('Delivery — Orders')
+  @ApiOperation({ summary: 'Mark an assigned order as delivered' })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: { note: { type: 'string' } },
+    },
+    required: false,
+  })
+  @DeliveryOnly()
+  markDelivered(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() body?: { note?: string },
+  ) {
+    return this.ordersService.markDeliveredByCourier(
+      user.userId,
+      id,
+      body?.note,
+    );
+  }
+
+  @Get('delivery/earnings')
+  @ApiTags('Delivery — Earnings')
+  @ApiOperation({
+    summary: 'Courier earnings dashboard (lifetime + selected month)',
+  })
+  @DeliveryOnly()
+  earnings(
+    @CurrentUser() user: AuthUser,
+    @Query('month') month?: string,
+  ) {
+    return this.ordersService.earningsForDeliveryGuy(user.userId, month);
   }
 }

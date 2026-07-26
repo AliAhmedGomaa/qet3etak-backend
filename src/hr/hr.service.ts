@@ -373,6 +373,17 @@ export class HrService {
     vac.reviewedBy = new Types.ObjectId(adminId);
     vac.reviewedAt = new Date();
     await vac.save();
+
+    const approved = dto.status === VacationStatus.APPROVED;
+    await this.pushService.notifyUser(String(vac.employeeId), {
+      title: approved ? 'تمت الموافقة على إجازتك' : 'تم رفض طلب الإجازة',
+      body: approved
+        ? `طلب إجازتك (${vac.days} يوم) تمت الموافقة عليه`
+        : `طلب إجازتك رُفض${vac.reviewNote ? `: ${vac.reviewNote}` : ''}`,
+      url: '/vacations',
+      tag: `vacation-review-${String(vac._id)}`,
+    });
+
     return toView(vac);
   }
 
@@ -437,6 +448,13 @@ export class HrService {
       expenseId: new Types.ObjectId(String(expense['id'])),
       paidBy: new Types.ObjectId(adminId),
       note: dto.note?.trim() || '',
+    });
+
+    await this.pushService.notifyUser(employeeId, {
+      title: 'تم صرف الراتب',
+      body: `تم تسجيل صرف راتب شهر ${month} بمبلغ ${amount}`,
+      url: '/home',
+      tag: `salary-paid-${month}-${employeeId}`,
     });
 
     return {
@@ -611,6 +629,15 @@ export class HrService {
       note: dto.note?.trim() || '',
       createdBy: new Types.ObjectId(adminId),
     });
+
+    const isBonus = dto.type === PayrollAdjustmentType.BONUS;
+    await this.pushService.notifyUser(dto.employeeId, {
+      title: isBonus ? 'مكافأة جديدة' : 'خصم على الراتب',
+      body: `${isBonus ? 'مكافأة' : 'خصم'} بقيمة ${round(dto.amount)} لشهر ${dto.month}${dto.note?.trim() ? ` — ${dto.note.trim()}` : ''}`,
+      url: '/adjustments',
+      tag: `adjustment-${String(doc._id)}`,
+    });
+
     return toView(doc);
   }
 

@@ -16,6 +16,8 @@ import {
 import { UserRole } from '../common/enums/user.enums';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { AdminOnly } from '../auth/decorators/admin-only.decorator';
+import { DeliveryOnly } from '../auth/decorators/delivery-only.decorator';
+import { EmployeeOnly } from '../auth/decorators/employee-only.decorator';
 import { RequireApproved } from '../auth/decorators/require-approved.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -31,6 +33,184 @@ export class PushController {
   constructor(private readonly pushService: PushService) {}
 
   /** Public — browsers need this before/during Notification permission. */
+  @Post('employee/push/subscribe')
+  @ApiTags('Employee — Push')
+  @ApiBearerAuth('JWT')
+  @ApiOperation({ summary: 'Save a push subscription (employee)' })
+  @ApiBody({
+    type: SavePushSubscriptionDto,
+    examples: examples('pushSubscribeRequest'),
+  })
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @EmployeeOnly()
+  async subscribeEmployee(
+    @CurrentUser() user: AuthUser,
+    @Body() dto: SavePushSubscriptionDto,
+  ) {
+    const sub = await this.pushService.saveSubscription(
+      user.userId,
+      dto,
+      'EMPLOYEE',
+    );
+    const tickleSent = await this.pushService.tickleUser(user.userId);
+    const confirmationSent = await this.pushService.notifyUser(user.userId, {
+      title: 'تم تفعيل إشعارات الموظف',
+      body: 'ستصلك تنبيهات الإجازات والرواتب هنا',
+      url: '/home',
+      tag: `push-welcome-employee-${Date.now()}`,
+    });
+    return {
+      id: String(sub._id),
+      tickleSent,
+      confirmationSent,
+    };
+  }
+
+  @Delete('employee/push/subscribe')
+  @ApiTags('Employee — Push')
+  @ApiBearerAuth('JWT')
+  @ApiOperation({ summary: 'Remove a push subscription (employee)' })
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @EmployeeOnly()
+  unsubscribeEmployee(
+    @CurrentUser() user: AuthUser,
+    @Body() body: UnsubscribePushDto,
+  ) {
+    return this.pushService.removeSubscription(user.userId, body.endpoint);
+  }
+
+  @Get('employee/push/inbox')
+  @ApiTags('Employee — Push')
+  @ApiBearerAuth('JWT')
+  @ApiOperation({ summary: 'Unread in-app notification inbox (employee)' })
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @EmployeeOnly()
+  inboxEmployee(@CurrentUser() user: AuthUser) {
+    return this.pushService.listUnreadInbox(user.userId);
+  }
+
+  @Post('employee/push/inbox/read')
+  @ApiTags('Employee — Push')
+  @ApiBearerAuth('JWT')
+  @ApiOperation({ summary: 'Mark employee inbox notifications as read' })
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @EmployeeOnly()
+  async inboxEmployeeRead(
+    @CurrentUser() user: AuthUser,
+    @Body() body: { ids?: string[] },
+  ) {
+    const modified = await this.pushService.markInboxRead(
+      user.userId,
+      body?.ids,
+    );
+    return { modified };
+  }
+
+  @Post('employee/push/test')
+  @ApiTags('Employee — Push')
+  @ApiBearerAuth('JWT')
+  @ApiOperation({ summary: 'Send a test push to the current employee' })
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @EmployeeOnly()
+  async testEmployee(@CurrentUser() user: AuthUser) {
+    const sent = await this.pushService.notifyUser(user.userId, {
+      title: 'اختبار إشعار الموظف',
+      body: 'إذا وصلتك هذه الرسالة فالإشعارات تعمل',
+      url: '/home',
+      tag: `push-test-employee-${Date.now()}`,
+    });
+    return { enabled: this.pushService.isEnabled(), sent };
+  }
+
+  @Post('delivery/push/subscribe')
+  @ApiTags('Delivery — Push')
+  @ApiBearerAuth('JWT')
+  @ApiOperation({ summary: 'Save a push subscription (delivery)' })
+  @ApiBody({
+    type: SavePushSubscriptionDto,
+    examples: examples('pushSubscribeRequest'),
+  })
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @DeliveryOnly()
+  async subscribeDelivery(
+    @CurrentUser() user: AuthUser,
+    @Body() dto: SavePushSubscriptionDto,
+  ) {
+    const sub = await this.pushService.saveSubscription(
+      user.userId,
+      dto,
+      'DELIVERY',
+    );
+    const tickleSent = await this.pushService.tickleUser(user.userId);
+    const confirmationSent = await this.pushService.notifyUser(user.userId, {
+      title: 'تم تفعيل إشعارات التوصيل',
+      body: 'ستصلك تنبيهات الطلبات المسندة إليك هنا',
+      url: '/orders',
+      tag: `push-welcome-delivery-${Date.now()}`,
+    });
+    return {
+      id: String(sub._id),
+      tickleSent,
+      confirmationSent,
+    };
+  }
+
+  @Delete('delivery/push/subscribe')
+  @ApiTags('Delivery — Push')
+  @ApiBearerAuth('JWT')
+  @ApiOperation({ summary: 'Remove a push subscription (delivery)' })
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @DeliveryOnly()
+  unsubscribeDelivery(
+    @CurrentUser() user: AuthUser,
+    @Body() body: UnsubscribePushDto,
+  ) {
+    return this.pushService.removeSubscription(user.userId, body.endpoint);
+  }
+
+  @Get('delivery/push/inbox')
+  @ApiTags('Delivery — Push')
+  @ApiBearerAuth('JWT')
+  @ApiOperation({ summary: 'Unread in-app notification inbox (delivery)' })
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @DeliveryOnly()
+  inboxDelivery(@CurrentUser() user: AuthUser) {
+    return this.pushService.listUnreadInbox(user.userId);
+  }
+
+  @Post('delivery/push/inbox/read')
+  @ApiTags('Delivery — Push')
+  @ApiBearerAuth('JWT')
+  @ApiOperation({ summary: 'Mark delivery inbox notifications as read' })
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @DeliveryOnly()
+  async inboxDeliveryRead(
+    @CurrentUser() user: AuthUser,
+    @Body() body: { ids?: string[] },
+  ) {
+    const modified = await this.pushService.markInboxRead(
+      user.userId,
+      body?.ids,
+    );
+    return { modified };
+  }
+
+  @Post('delivery/push/test')
+  @ApiTags('Delivery — Push')
+  @ApiBearerAuth('JWT')
+  @ApiOperation({ summary: 'Send a test push to the current courier' })
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @DeliveryOnly()
+  async testDelivery(@CurrentUser() user: AuthUser) {
+    const sent = await this.pushService.notifyUser(user.userId, {
+      title: 'اختبار إشعار المندوب',
+      body: 'إذا وصلتك هذه الرسالة فالإشعارات تعمل',
+      url: '/orders',
+      tag: `push-test-delivery-${Date.now()}`,
+    });
+    return { enabled: this.pushService.isEnabled(), sent };
+  }
+
   @Get('push/vapid-public-key')
   @ApiTags('Wholesale — Push')
   @ApiOperation({ summary: 'Get the VAPID public key for push subscriptions' })
@@ -65,17 +245,19 @@ export class PushController {
       dto,
       'SHOP_OWNER',
     );
-    // Payload-less tickle first (isolates encryption issues), then a real payload.
-    const tickleSent = await this.pushService.tickleUser(user.userId);
-    const confirmationSent = await this.pushService.notifyUser(user.userId, {
-      title: 'تم تفعيل الإشعارات',
-      body: 'إذا رأيت هذا، فإشعارات المتجر تعمل',
-      url: '/home',
-      tag: `push-welcome-${Date.now()}`,
-    });
+    // Single confirmation push only (no tickle / no inbox duplicate).
+    const confirmationSent = await this.pushService.notifyUser(
+      user.userId,
+      {
+        title: 'تم تفعيل الإشعارات',
+        body: 'الإشعارات تعمل الآن',
+        url: '/home',
+        tag: `push-welcome-${Date.now()}`,
+      },
+      { skipInbox: true },
+    );
     return {
       id: String(sub._id),
-      tickleSent,
       confirmationSent,
       keyLens: {
         p256dh: dto.keys.p256dh?.length ?? 0,

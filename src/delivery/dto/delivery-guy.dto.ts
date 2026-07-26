@@ -24,6 +24,14 @@ export class CreateDeliveryGuyDto {
   @MinLength(8)
   phone!: string;
 
+  @ApiProperty({
+    example: 'Delivery123!',
+    description: 'Portal login password (required on create)',
+  })
+  @IsString()
+  @MinLength(6)
+  password!: string;
+
   @ApiPropertyOptional({ example: 'Cairo' })
   @IsOptional()
   @IsString()
@@ -84,7 +92,16 @@ export class CreateDeliveryGuyDto {
   perItemFee?: number;
 }
 
-export class UpdateDeliveryGuyDto extends PartialType(CreateDeliveryGuyDto) {}
+export class UpdateDeliveryGuyDto extends PartialType(CreateDeliveryGuyDto) {
+  @ApiPropertyOptional({
+    example: 'Delivery123!',
+    description: 'Optional new portal password',
+  })
+  @IsOptional()
+  @IsString()
+  @MinLength(6)
+  password?: string;
+}
 
 export class CalculateDeliveryFeeDto {
   @ApiProperty({ example: 1500, minimum: 0 })

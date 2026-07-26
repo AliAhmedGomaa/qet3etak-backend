@@ -1,6 +1,6 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
+import { IsIn, IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
 
 export class PaginationQueryDto {
   @ApiPropertyOptional({ example: 1, minimum: 1, default: 1 })
@@ -86,6 +86,18 @@ export class PaginatedStatusQueryDto extends PaginationQueryDto {
   @IsOptional()
   @IsString()
   shopId?: string;
+}
+
+/** Courier order list: pagination + active/delivered tab. */
+export class DeliveryOrdersQueryDto extends PaginationQueryDto {
+  @ApiPropertyOptional({
+    example: 'delivered',
+    enum: ['active', 'delivered', 'all'],
+    description: 'Courier list tab (default: active)',
+  })
+  @IsOptional()
+  @IsIn(['active', 'delivered', 'all'])
+  tab?: 'active' | 'delivered' | 'all';
 }
 
 export interface PaginatedResult<T> {

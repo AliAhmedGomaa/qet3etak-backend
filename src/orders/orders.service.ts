@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -18,7 +19,11 @@ import { UsersService } from '../users/users.service';
 import { WalletsService } from '../wallets/wallets.service';
 import { PushService } from '../push/push.service';
 import { DeliveryGuysService } from '../delivery/delivery-guys.service';
-import { DeliveryGuyStatus } from '../common/enums/delivery.enums';
+import {
+  DeliveryFeeModel,
+  DeliveryGuyStatus,
+} from '../common/enums/delivery.enums';
+import { DeliveryGuy } from '../delivery/schemas/delivery-guy.schema';
 import { InvoicesService } from '../invoices/invoices.service';
 import {
   AssignOrderDeliveryDto,
@@ -69,6 +74,40 @@ function buildOrderSearchFilter(q?: string): Record<string, unknown> {
   if (!term) return {};
   const rx = new RegExp(escapeRegex(term), 'i');
   return { $or: [{ orderNumber: rx }, { shopName: rx }] };
+}
+
+function parseYearMonth(month?: string): string {
+  const raw =
+    month?.trim() ||
+    `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
+  if (!/^\d{4}-\d{2}$/.test(raw)) {
+    throw new BadRequestException('month must be YYYY-MM');
+  }
+  return raw;
+}
+
+function monthBounds(month: string): { start: Date; end: Date } {
+  const [y, m] = month.split('-').map(Number);
+  const start = new Date(Date.UTC(y, m - 1, 1, 0, 0, 0, 0));
+  const end = new Date(Date.UTC(y, m, 1, 0, 0, 0, 0));
+  return { start, end };
+}
+
+function feeModelSummary(
+  guy: Pick<
+    DeliveryGuy,
+    'feeModel' | 'flatFee' | 'percentRate' | 'baseFee' | 'perItemFee'
+  >,
+): string {
+  switch (guy.feeModel) {
+    case DeliveryFeeModel.PERCENT:
+      return `${guy.percentRate}% من قيمة الطلب`;
+    case DeliveryFeeModel.BASE_PLUS_ITEMS:
+      return `${guy.baseFee} ج.م + ${guy.perItemFee} ج.م لكل قطعة`;
+    case DeliveryFeeModel.FLAT:
+    default:
+      return `${guy.flatFee} ج.م لكل توصيلة`;
+  }
 }
 
 @Injectable()
@@ -388,6 +427,14 @@ export class OrdersService {
         url: `/orders/${order.id}`,
         tag: `order-${order.id}`,
       });
+      if (dto.status === OrderStatus.DELIVERED) {
+        await this.pushService.notifyAdmins({
+          title: `تم تسليم ${order.orderNumber}`,
+          body: `${order.shopName}${order.deliveryGuyName ? ` — ${order.deliveryGuyName}` : ''}`,
+          url: '/orders-board',
+          tag: `order-delivered-${order.id}`,
+        });
+      }
     }
 
     // Count fee toward courier stats once when order reaches DELIVERED.
@@ -404,6 +451,179 @@ export class OrdersService {
     }
 
     return order;
+  }
+
+  async listForDeliveryGuy(
+    deliveryGuyId: string,
+    page?: number,
+    limit?: number,
+    tab: 'active' | 'delivered' | 'all' = 'active',
+  ): Promise<PaginatedResult<OrderDocument>> {
+    if (!Types.ObjectId.isValid(deliveryGuyId)) {
+      throw new BadRequestException('Invalid delivery guy id');
+    }
+    const p = normalizePagination(page, limit, 20);
+    const filter: Record<string, unknown> = {
+      deliveryGuyId: new Types.ObjectId(deliveryGuyId),
+    };
+    if (tab === 'active') {
+      filter['status'] = {
+        $in: [OrderStatus.RECEIVED, OrderStatus.PREPARING, OrderStatus.SHIPPED],
+      };
+    } else if (tab === 'delivered') {
+      filter['status'] = OrderStatus.DELIVERED;
+    }
+    const [items, total] = await Promise.all([
+      this.orderModel
+        .find(filter)
+        .sort({ updatedAt: -1, createdAt: -1 })
+        .skip(p.skip)
+        .limit(p.limit)
+        .exec(),
+      this.orderModel.countDocuments(filter).exec(),
+    ]);
+    return paginatedResult(items, total, p.page, p.limit);
+  }
+
+  async getForDeliveryGuy(
+    deliveryGuyId: string,
+    orderId: string,
+  ): Promise<OrderDocument> {
+    const order = await this.orderModel.findById(orderId).exec();
+    if (!order) throw new NotFoundException('Order not found');
+    if (String(order.deliveryGuyId ?? '') !== deliveryGuyId) {
+      throw new ForbiddenException('Order is not assigned to you');
+    }
+    return order;
+  }
+
+  async markDeliveredByCourier(
+    deliveryGuyId: string,
+    orderId: string,
+    note?: string,
+  ): Promise<OrderDocument> {
+    const order = await this.getForDeliveryGuy(deliveryGuyId, orderId);
+    if (order.status === OrderStatus.DELIVERED) {
+      throw new BadRequestException('Order already delivered');
+    }
+    return this.updateStatus(orderId, {
+      status: OrderStatus.DELIVERED,
+      note: note?.trim() || 'تم التسليم بواسطة المندوب',
+    });
+  }
+
+  async earningsForDeliveryGuy(
+    deliveryGuyId: string,
+    monthRaw?: string,
+  ): Promise<Record<string, unknown>> {
+    if (!Types.ObjectId.isValid(deliveryGuyId)) {
+      throw new BadRequestException('Invalid delivery guy id');
+    }
+    const guy = await this.deliveryGuysService.findById(deliveryGuyId);
+    const month = parseYearMonth(monthRaw);
+    const { start, end } = monthBounds(month);
+    const guyOid = new Types.ObjectId(deliveryGuyId);
+
+    const [monthAgg, pendingAgg, monthOrders] = await Promise.all([
+      this.orderModel
+        .aggregate([
+          {
+            $match: {
+              deliveryGuyId: guyOid,
+              status: OrderStatus.DELIVERED,
+              statusHistory: {
+                $elemMatch: {
+                  status: OrderStatus.DELIVERED,
+                  at: { $gte: start, $lt: end },
+                },
+              },
+            },
+          },
+          {
+            $group: {
+              _id: null,
+              deliveries: { $sum: 1 },
+              feesEarned: { $sum: '$deliveryFee' },
+              orderTotal: { $sum: '$total' },
+            },
+          },
+        ])
+        .exec(),
+      this.orderModel
+        .aggregate([
+          {
+            $match: {
+              deliveryGuyId: guyOid,
+              status: {
+                $in: [
+                  OrderStatus.RECEIVED,
+                  OrderStatus.PREPARING,
+                  OrderStatus.SHIPPED,
+                ],
+              },
+            },
+          },
+          {
+            $group: {
+              _id: null,
+              activeOrders: { $sum: 1 },
+              pendingFees: { $sum: '$deliveryFee' },
+            },
+          },
+        ])
+        .exec(),
+      this.orderModel
+        .find({
+          deliveryGuyId: guyOid,
+          status: OrderStatus.DELIVERED,
+          statusHistory: {
+            $elemMatch: {
+              status: OrderStatus.DELIVERED,
+              at: { $gte: start, $lt: end },
+            },
+          },
+        })
+        .sort({ updatedAt: -1 })
+        .limit(50)
+        .select('orderNumber shopName total deliveryFee updatedAt status')
+        .exec(),
+    ]);
+
+    const monthStats = monthAgg[0] ?? {};
+    const pending = pendingAgg[0] ?? {};
+
+    return {
+      id: String(guy._id),
+      fullName: guy.fullName,
+      phone: guy.phone,
+      city: guy.city,
+      vehicleType: guy.vehicleType,
+      feeModel: guy.feeModel,
+      flatFee: guy.flatFee,
+      percentRate: guy.percentRate,
+      baseFee: guy.baseFee,
+      perItemFee: guy.perItemFee,
+      feeSummary: feeModelSummary(guy),
+      month,
+      lifetimeDeliveries: guy.totalDeliveries,
+      lifetimeFeesEarned: guy.totalFeesEarned,
+      monthDeliveries: monthStats.deliveries ?? 0,
+      monthFeesEarned: Number((monthStats.feesEarned ?? 0).toFixed(2)),
+      monthOrderTotal: Number((monthStats.orderTotal ?? 0).toFixed(2)),
+      activeOrders: pending.activeOrders ?? 0,
+      pendingFees: Number((pending.pendingFees ?? 0).toFixed(2)),
+      recentDeliveries: monthOrders.map((o) => {
+        const json = o.toJSON() as unknown as Record<string, unknown>;
+        return {
+          id: json.id,
+          orderNumber: json.orderNumber,
+          shopName: json.shopName,
+          total: json.total,
+          deliveryFee: json.deliveryFee,
+          deliveredAt: json.updatedAt,
+        };
+      }),
+    };
   }
 
   async assignDelivery(
@@ -447,6 +667,12 @@ export class OrdersService {
         note: note.trim(),
       });
     }
+    await this.pushService.notifyUser(String(guy._id), {
+      title: `طلب جديد للتوصيل`,
+      body: `${order.orderNumber} — ${order.shopName}`,
+      url: `/orders/${String(order._id)}`,
+      tag: `order-assigned-${String(order._id)}`,
+    });
   }
 
   private async priceItems(

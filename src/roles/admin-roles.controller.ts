@@ -16,11 +16,12 @@ import {
 } from '@nestjs/swagger';
 import {
   AdminOnly,
-  SuperAdminOnly,
   UnscopedAdminOnly,
 } from '../auth/decorators/admin-only.decorator';
+import { RequirePermissions } from '../auth/decorators/require-permissions.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
+import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { PaginationQueryDto } from '../common/pagination';
 import { CreateRoleDto, UpdateRoleDto } from './dto/role.dto';
 import { RolesService } from './roles.service';
@@ -28,13 +29,22 @@ import { RolesService } from './roles.service';
 @ApiTags('Admin — Roles')
 @ApiBearerAuth('JWT')
 @Controller('admin/roles')
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
 export class AdminRolesController {
   constructor(private readonly rolesService: RolesService) {}
+
+  @Get('catalog')
+  @AdminOnly()
+  @RequirePermissions('roles.read', 'roles.manage', 'admin.panel')
+  @ApiOperation({ summary: 'Permission catalog for the roles matrix UI' })
+  catalog() {
+    return this.rolesService.permissionCatalog();
+  }
 
   /** Staff user form needs this — not super-admin only. */
   @Get()
   @UnscopedAdminOnly()
+  @RequirePermissions('roles.read', 'roles.manage', 'users.read', 'users.create', 'users.update')
   @ApiOperation({
     summary: 'List roles (system + custom)',
     description:
@@ -62,7 +72,7 @@ export class AdminRolesController {
   }
 
   @Post()
-  @SuperAdminOnly()
+  @RequirePermissions('roles.manage')
   @ApiOperation({ summary: 'Create a custom role' })
   async create(@Body() dto: CreateRoleDto) {
     const role = await this.rolesService.create(dto);
@@ -71,6 +81,7 @@ export class AdminRolesController {
 
   @Get(':id')
   @AdminOnly()
+  @RequirePermissions('roles.read', 'roles.manage')
   @ApiOperation({ summary: 'Get a role by id' })
   async get(@Param('id') id: string) {
     const role = await this.rolesService.findByIdOrFail(id);
@@ -78,7 +89,7 @@ export class AdminRolesController {
   }
 
   @Patch(':id')
-  @SuperAdminOnly()
+  @RequirePermissions('roles.manage')
   @ApiOperation({
     summary: 'Update a role',
     description:
@@ -90,7 +101,7 @@ export class AdminRolesController {
   }
 
   @Delete(':id')
-  @SuperAdminOnly()
+  @RequirePermissions('roles.manage')
   @ApiOperation({
     summary: 'Delete a custom role (blocked if system or in-use)',
   })

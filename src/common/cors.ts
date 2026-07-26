@@ -4,15 +4,19 @@ const DEFAULT_ORIGINS = [
   'http://localhost:4200',
   'http://localhost:4201',
   'http://localhost:4202',
+  'http://localhost:4203',
   'http://127.0.0.1:4200',
   'http://127.0.0.1:4201',
   'http://127.0.0.1:4202',
+  'http://127.0.0.1:4203',
   'https://qet3etak-shop-owner.vercel.app',
   'https://qet3etak-admin-dashboard.vercel.app',
   'https://qet3etak-employee-portal.vercel.app',
+  'https://qet3etak-delivery-portal.vercel.app',
   'https://qet3etak-shop-owner-aliahmedgomaas-projects.vercel.app',
   'https://qet3etak-admin-dashboard-aliahmedgomaas-projects.vercel.app',
   'https://qet3etak-employee-portal-aliahmedgomaas-projects.vercel.app',
+  'https://qet3etak-delivery-portal-aliahmedgomaas-projects.vercel.app',
 ];
 
 function parseExtraOrigins(raw?: string): string[] {
@@ -32,14 +36,15 @@ function isAllowedOrigin(origin: string, allowlist: string[]): boolean {
       host.endsWith('.vercel.app') &&
       (host.includes('qet3etak-shop-owner') ||
         host.includes('qet3etak-admin-dashboard') ||
-        host.includes('qet3etak-employee-portal'))
+        host.includes('qet3etak-employee-portal') ||
+        host.includes('qet3etak-delivery-portal'))
     );
   } catch {
     return false;
   }
 }
 
-/** CORS for browser apps (shop + admin + employee) calling this API. */
+/** CORS for browser apps (shop + admin + employee + delivery) calling this API. */
 export function buildCorsOptions(): CorsOptions {
   const allowlist = [
     ...DEFAULT_ORIGINS,

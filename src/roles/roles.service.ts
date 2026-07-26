@@ -18,6 +18,11 @@ import { User, UserDocument } from '../users/schemas/user.schema';
 import { SYSTEM_ROLE_SEEDS } from './role.definitions';
 import { CreateRoleDto, UpdateRoleDto } from './dto/role.dto';
 import { Role, RoleDocument } from './schemas/role.schema';
+import {
+  ALL_PERMISSION_KEYS,
+  PERMISSION_CATALOG,
+  isLegacyPermissionSet,
+} from '../common/permissions';
 
 @Injectable()
 export class RolesService implements OnModuleInit {
@@ -38,28 +43,39 @@ export class RolesService implements OnModuleInit {
 
   async ensureSystemRoles(): Promise<void> {
     for (const seed of SYSTEM_ROLE_SEEDS) {
-      await this.roleModel
-        .findOneAndUpdate(
-          { code: seed.code },
-          {
-            // isSystem/code only on insert — Mongo rejects the same path in $set + $setOnInsert
-            $setOnInsert: {
-              code: seed.code,
-              isSystem: true,
-            },
-            $set: {
-              name: seed.name,
-              description: seed.description,
-              adminPanel: seed.adminPanel,
-              permissions: seed.permissions,
-              isActive: true,
-            },
-          },
-          { upsert: true, new: true },
-        )
-        .exec();
+      const existing = await this.roleModel.findOne({ code: seed.code }).exec();
+      if (!existing) {
+        await this.roleModel.create({
+          code: seed.code,
+          name: seed.name,
+          description: seed.description,
+          adminPanel: seed.adminPanel,
+          permissions: seed.permissions,
+          isSystem: true,
+          isActive: true,
+        });
+        continue;
+      }
+      // Keep admin-customized permissions; only upgrade legacy minimal sets.
+      const nextPerms = isLegacyPermissionSet(existing.permissions)
+        ? seed.permissions
+        : existing.permissions;
+      existing.name = seed.name;
+      existing.description = seed.description;
+      existing.adminPanel = seed.adminPanel;
+      existing.permissions = nextPerms;
+      existing.isSystem = true;
+      existing.isActive = true;
+      await existing.save();
     }
     this.logger.log(`Ensured ${SYSTEM_ROLE_SEEDS.length} system roles`);
+  }
+
+  permissionCatalog() {
+    return {
+      items: PERMISSION_CATALOG,
+      keys: ALL_PERMISSION_KEYS,
+    };
   }
 
   /**

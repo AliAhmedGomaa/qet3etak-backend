@@ -14,7 +14,12 @@ import {
   isAdminPanelRole,
 } from '../common/enums/user.enums';
 import { EMPLOYEE_ROLE, EmployeeStatus } from '../common/enums/hr.enums';
+import {
+  DELIVERY_ROLE,
+  DeliveryGuyStatus,
+} from '../common/enums/delivery.enums';
 import { absoluteMediaUrl } from '../common/media-url';
+import { DeliveryGuy } from '../delivery/schemas/delivery-guy.schema';
 import { Employee } from '../hr/schemas/employee.schema';
 import { RolesService } from '../roles/roles.service';
 import { UserDocument } from '../users/schemas/user.schema';
@@ -30,6 +35,8 @@ export class AuthService {
     private readonly jwtService: JwtService,
     @InjectModel(Employee.name)
     private readonly employeeModel: Model<Employee>,
+    @InjectModel(DeliveryGuy.name)
+    private readonly deliveryGuyModel: Model<DeliveryGuy>,
   ) {}
 
   async registerShop(
@@ -135,6 +142,53 @@ export class AuthService {
     return { ...json, role: EMPLOYEE_ROLE, kind: 'employee' };
   }
 
+  async loginDelivery(
+    dto: LoginDto,
+  ): Promise<{ accessToken: string; user: Record<string, unknown> }> {
+    const guy = await this.deliveryGuyModel
+      .findOne({ phone: dto.phone.trim() })
+      .select('+passwordHash')
+      .exec();
+    if (!guy?.passwordHash) {
+      throw new UnauthorizedException('Invalid phone or password');
+    }
+    const ok = await bcrypt.compare(dto.password, guy.passwordHash);
+    if (!ok) {
+      throw new UnauthorizedException('Invalid phone or password');
+    }
+    if (guy.status !== DeliveryGuyStatus.ACTIVE) {
+      throw new UnauthorizedException({
+        code: 'INACTIVE',
+        message: 'الحساب غير نشط — تواصل مع الإدارة',
+      });
+    }
+    const payload = {
+      sub: String(guy._id),
+      phone: guy.phone,
+      kind: 'delivery' as const,
+    };
+    const accessToken = this.jwtService.sign(payload);
+    const json = guy.toJSON() as unknown as Record<string, unknown>;
+    return {
+      accessToken,
+      user: {
+        ...json,
+        role: DELIVERY_ROLE,
+        kind: 'delivery',
+      },
+    };
+  }
+
+  async deliveryMe(deliveryGuyId: string): Promise<Record<string, unknown>> {
+    const guy = await this.deliveryGuyModel.findById(deliveryGuyId).exec();
+    if (!guy) throw new UnauthorizedException('Delivery guy no longer exists');
+    if (guy.status !== DeliveryGuyStatus.ACTIVE) {
+      throw new UnauthorizedException('Delivery account is inactive');
+    }
+    const json = guy.toJSON() as unknown as Record<string, unknown>;
+    return { ...json, role: DELIVERY_ROLE, kind: 'delivery' };
+  }
+
   async me(userId: string): Promise<Record<string, unknown>> {
     const user = await this.usersService.findByIdOrFail(userId);
     return this.toUserView(user);
@@ -170,6 +224,7 @@ export class AuthService {
       roleId: roleDoc ? String(roleDoc._id) : json.roleId ?? null,
       adminPanel,
       roleName: roleDoc?.name ?? roleCode,
+      permissions: roleDoc?.permissions ?? [],
       commercialRegPhotoUrl: absoluteMediaUrl(
         typeof json.commercialRegPhotoUrl === 'string'
           ? json.commercialRegPhotoUrl

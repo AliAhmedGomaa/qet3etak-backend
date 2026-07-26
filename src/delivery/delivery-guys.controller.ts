@@ -15,7 +15,7 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { DeliveryGuyStatus } from '../common/enums/delivery.enums';
-import { PaginationQueryDto } from '../common/pagination';
+import { PaginatedStatusQueryDto } from '../common/pagination';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { AdminOnly } from '../auth/decorators/admin-only.decorator';
@@ -35,11 +35,24 @@ export class DeliveryGuysController {
   constructor(private readonly deliveryGuysService: DeliveryGuysService) {}
 
   @Get()
-  @ApiOperation({ summary: 'List delivery guys (paginated)' })
-  list(
-    @Query() query: PaginationQueryDto,
-    @Query('status') status?: DeliveryGuyStatus,
-  ) {
+  @ApiOperation({
+    summary: 'List delivery guys (paginated)',
+    description:
+      'Defaults to ACTIVE only. Pass status=INACTIVE, or status=ALL / includeInactive=1 for all.',
+  })
+  list(@Query() query: PaginatedStatusQueryDto) {
+    const includeAll =
+      query.status === 'ALL' ||
+      query.includeInactive === '1' ||
+      query.includeInactive === 'true';
+    const status: DeliveryGuyStatus | 'ALL' = includeAll
+      ? 'ALL'
+      : query.status &&
+          Object.values(DeliveryGuyStatus).includes(
+            query.status as DeliveryGuyStatus,
+          )
+        ? (query.status as DeliveryGuyStatus)
+        : DeliveryGuyStatus.ACTIVE;
     return this.deliveryGuysService.findAll(
       query.page,
       query.limit,
