@@ -1,20 +1,22 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument, Types } from 'mongoose';
-import { UserRole } from '../../common/enums/user.enums';
 
 export type ChatMessageDocument = HydratedDocument<ChatMessage>;
 
 @Schema({ timestamps: true, collection: 'chat_messages' })
 export class ChatMessage {
-  /** Conversation key — the shop owner's user id (one thread per shop ⟷ admin). */
-  @Prop({ type: Types.ObjectId, ref: 'User', required: true, index: true })
+  /**
+   * Conversation key — shop User id or Employee id (same field as Conversation.shopId).
+   */
+  @Prop({ type: Types.ObjectId, required: true, index: true })
   shopId!: Types.ObjectId;
 
-  @Prop({ type: Types.ObjectId, ref: 'User', required: true })
+  @Prop({ type: Types.ObjectId, required: true })
   senderId!: Types.ObjectId;
 
-  @Prop({ type: String, enum: UserRole, required: true })
-  senderRole!: UserRole;
+  /** SHOP_OWNER | EMPLOYEE | ADMIN | MANAGER | STAFF | … */
+  @Prop({ type: String, required: true })
+  senderRole!: string;
 
   @Prop({ required: true, trim: true })
   text!: string;

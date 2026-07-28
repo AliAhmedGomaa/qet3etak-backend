@@ -70,7 +70,7 @@ export const PERMISSION_CATALOG: PermissionDef[] = [
   { key: 'special_requests.read', labelAr: 'عرض الطلبات الخاصة', group: 'special', groupLabelAr: 'طلبات خاصة' },
   { key: 'special_requests.manage', labelAr: 'إدارة الطلبات الخاصة', group: 'special', groupLabelAr: 'طلبات خاصة' },
 
-  { key: 'chat.manage', labelAr: 'الدردشة مع المحلات', group: 'comms', groupLabelAr: 'التواصل' },
+  { key: 'chat.manage', labelAr: 'الدردشة مع المحلات والموظفين', group: 'comms', groupLabelAr: 'التواصل' },
   { key: 'broadcast.manage', labelAr: 'إرسال إشعارات جماعية', group: 'comms', groupLabelAr: 'التواصل' },
 
   { key: 'admin.branch_scoped', labelAr: 'تقييد البيانات بفرع المستخدم', group: 'scope', groupLabelAr: 'النطاق' },

@@ -9,14 +9,18 @@ const DEFAULT_ORIGINS = [
   'http://127.0.0.1:4201',
   'http://127.0.0.1:4202',
   'http://127.0.0.1:4203',
+  'http://localhost:4204',
+  'http://127.0.0.1:4204',
   'https://qet3etak-shop-owner.vercel.app',
   'https://qet3etak-admin-dashboard.vercel.app',
   'https://qet3etak-employee-portal.vercel.app',
   'https://qet3etak-delivery-portal.vercel.app',
+  'https://qet3etak-customer-portal.vercel.app',
   'https://qet3etak-shop-owner-aliahmedgomaas-projects.vercel.app',
   'https://qet3etak-admin-dashboard-aliahmedgomaas-projects.vercel.app',
   'https://qet3etak-employee-portal-aliahmedgomaas-projects.vercel.app',
   'https://qet3etak-delivery-portal-aliahmedgomaas-projects.vercel.app',
+  'https://qet3etak-customer-portal-aliahmedgomaas-projects.vercel.app',
 ];
 
 function parseExtraOrigins(raw?: string): string[] {
@@ -37,7 +41,8 @@ function isAllowedOrigin(origin: string, allowlist: string[]): boolean {
       (host.includes('qet3etak-shop-owner') ||
         host.includes('qet3etak-admin-dashboard') ||
         host.includes('qet3etak-employee-portal') ||
-        host.includes('qet3etak-delivery-portal'))
+        host.includes('qet3etak-delivery-portal') ||
+        host.includes('qet3etak-customer-portal'))
     );
   } catch {
     return false;

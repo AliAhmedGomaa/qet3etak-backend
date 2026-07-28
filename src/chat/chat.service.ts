@@ -3,22 +3,31 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import type { Server } from 'socket.io';
 import { UserRole, isAdminPanelRole } from '../common/enums/user.enums';
+import { EMPLOYEE_ROLE } from '../common/enums/hr.enums';
 import { PushService } from '../push/push.service';
 import { ChatMessage } from './schemas/message.schema';
-import { Conversation } from './schemas/conversation.schema';
+import {
+  ChatParticipantKind,
+  Conversation,
+} from './schemas/conversation.schema';
 
 export const ADMIN_ROOM = 'admins';
 export const shopRoom = (shopId: string) => `shop:${shopId}`;
-/** A shop owner is actively looking at their own support thread. */
+/** A shop/employee is actively looking at their own support thread. */
 export const shopViewRoom = (shopId: string) => `view:shop:${shopId}`;
-/** An admin is actively looking at this shop's conversation. */
+/** An admin is actively looking at this conversation. */
 export const adminViewRoom = (shopId: string) => `view:admin:${shopId}`;
+
+export function isChatParticipantRole(role: string | undefined | null): boolean {
+  return role === UserRole.SHOP_OWNER || role === EMPLOYEE_ROLE;
+}
 
 interface SendMessageInput {
   shopId: string;
   shopName?: string;
+  kind?: ChatParticipantKind;
   senderId: string;
-  senderRole: UserRole;
+  senderRole: string;
   text: string;
 }
 
@@ -47,6 +56,7 @@ export class ChatService {
   async sendMessage(input: SendMessageInput): Promise<Record<string, unknown>> {
     const shopObjectId = new Types.ObjectId(input.shopId);
     const text = input.text.trim();
+    const fromParticipant = isChatParticipantRole(input.senderRole);
 
     const message = await this.messageModel.create({
       shopId: shopObjectId,
@@ -56,13 +66,13 @@ export class ChatService {
       read: false,
     });
 
-    const fromShop = input.senderRole === UserRole.SHOP_OWNER;
     const update: Record<string, unknown> = {
       lastMessage: text,
       lastMessageAt: new Date(),
-      $inc: fromShop ? { unreadForAdmin: 1 } : { unreadForShop: 1 },
+      $inc: fromParticipant ? { unreadForAdmin: 1 } : { unreadForShop: 1 },
     };
     if (input.shopName) update['shopName'] = input.shopName;
+    if (input.kind) update['kind'] = input.kind;
 
     const conversation = await this.conversationModel
       .findOneAndUpdate({ shopId: shopObjectId }, update, {
@@ -72,14 +82,22 @@ export class ChatService {
       })
       .exec();
 
+    // Ensure kind is set on insert when only admin replies first.
+    if (input.kind && conversation && conversation.kind !== input.kind) {
+      conversation.kind = input.kind;
+      await conversation.save();
+    }
+
     const messageView = view(message);
+    const displayName =
+      (conversation?.shopName as string) || input.shopName || 'محادثة';
+    const kind: ChatParticipantKind =
+      (conversation?.kind as ChatParticipantKind) ||
+      input.kind ||
+      'SHOP';
 
-    // Push first (must complete before the HTTP response on Vercel).
-    const shopName =
-      (conversation?.shopName as string) || input.shopName || 'متجر';
-    await this.pushToRecipient(input, shopName, text);
+    await this.pushToRecipient(input, displayName, text, kind);
 
-    // Realtime fan-out is best-effort (Socket.IO is flaky on serverless).
     try {
       this.emitMessage(input.shopId, messageView);
       if (conversation) this.emitConversation(input.shopId, view(conversation));
@@ -92,28 +110,26 @@ export class ChatService {
     return messageView;
   }
 
-  /**
-   * Always send a web-push to the recipient side.
-   * (Presence-based suppression is unreliable on serverless Socket.IO.)
-   */
   private async pushToRecipient(
     input: SendMessageInput,
-    shopName: string,
+    displayName: string,
     text: string,
+    kind: ChatParticipantKind,
   ): Promise<void> {
     try {
       const preview = text.length > 120 ? `${text.slice(0, 117)}…` : text;
       const tag = `chat-${input.shopId}-${Date.now()}`;
 
-      if (input.senderRole === UserRole.SHOP_OWNER) {
+      if (isChatParticipantRole(input.senderRole)) {
+        const label = kind === 'EMPLOYEE' ? 'موظف' : 'متجر';
         const sent = await this.pushService.notifyAdmins({
-          title: `رسالة من ${shopName}`,
+          title: `رسالة من ${displayName} (${label})`,
           body: preview,
           url: '/chat',
           tag,
         });
         this.logger.log(
-          `[chat] push to admins shopId=${input.shopId} sent=${sent}`,
+          `[chat] push to admins id=${input.shopId} kind=${kind} sent=${sent}`,
         );
       } else {
         const sent = await this.pushService.notifyUser(input.shopId, {
@@ -123,7 +139,7 @@ export class ChatService {
           tag,
         });
         this.logger.log(
-          `[chat] push to shop shopId=${input.shopId} sent=${sent}`,
+          `[chat] push to participant id=${input.shopId} kind=${kind} sent=${sent}`,
         );
       }
     } catch (err) {
@@ -143,39 +159,68 @@ export class ChatService {
   async getOrCreateConversation(
     shopId: string,
     shopName?: string,
+    kind: ChatParticipantKind = 'SHOP',
   ): Promise<Record<string, unknown>> {
     const shopObjectId = new Types.ObjectId(shopId);
     const conversation = await this.conversationModel
       .findOneAndUpdate(
         { shopId: shopObjectId },
-        { $setOnInsert: { shopId: shopObjectId }, ...(shopName ? { shopName } : {}) },
+        {
+          $setOnInsert: { shopId: shopObjectId, kind },
+          ...(shopName ? { shopName } : {}),
+          ...(kind ? { kind } : {}),
+        },
         { upsert: true, new: true, setDefaultsOnInsert: true },
       )
       .exec();
     return view(conversation!);
   }
 
-  async listConversations(): Promise<Record<string, unknown>[]> {
+  async getConversation(
+    shopId: string,
+  ): Promise<Record<string, unknown> | null> {
+    if (!Types.ObjectId.isValid(shopId)) return null;
+    const conversation = await this.conversationModel
+      .findOne({ shopId: new Types.ObjectId(shopId) })
+      .exec();
+    if (!conversation) return null;
+    const json = view(conversation);
+    if (!json['kind']) json['kind'] = 'SHOP';
+    return json;
+  }
+
+  async listConversations(
+    kind?: ChatParticipantKind,
+  ): Promise<Record<string, unknown>[]> {
+    const filter: Record<string, unknown> = {};
+    if (kind === 'EMPLOYEE') {
+      filter['kind'] = 'EMPLOYEE';
+    } else if (kind === 'SHOP') {
+      filter['$or'] = [{ kind: 'SHOP' }, { kind: { $exists: false } }];
+    }
     const conversations = await this.conversationModel
-      .find()
+      .find(filter)
       .sort({ lastMessageAt: -1, updatedAt: -1 })
       .exec();
-    return conversations.map((c) => view(c));
+    return conversations.map((c) => {
+      const json = view(c);
+      if (!json['kind']) json['kind'] = 'SHOP';
+      return json;
+    });
   }
 
   /** Mark the thread read for whichever side is viewing it. */
-  async markRead(shopId: string, reader: UserRole): Promise<void> {
+  async markRead(shopId: string, reader: string): Promise<void> {
     const shopObjectId = new Types.ObjectId(shopId);
     const readerIsAdmin = isAdminPanelRole(reader);
 
-    // Messages from the *other* party become read.
     await this.messageModel
       .updateMany(
         {
           shopId: shopObjectId,
           senderRole: readerIsAdmin
-            ? UserRole.SHOP_OWNER
-            : { $ne: UserRole.SHOP_OWNER },
+            ? { $in: [UserRole.SHOP_OWNER, EMPLOYEE_ROLE] }
+            : { $nin: [UserRole.SHOP_OWNER, EMPLOYEE_ROLE] },
           read: false,
         },
         { read: true },

@@ -347,16 +347,20 @@ export class RolesService implements OnModuleInit {
 
   /**
    * Resolve role document for a user (by roleId, then by role code).
+   * Always reads MongoDB so permission edits apply immediately across serverless instances
+   * (in-memory role cache is not used here).
    */
   async resolveForUser(
     user: Pick<UserDocument, 'role' | 'roleId'>,
   ): Promise<RoleDocument | null> {
-    if (user.roleId) {
-      const byId = await this.findById(String(user.roleId));
+    if (user.roleId && Types.ObjectId.isValid(String(user.roleId))) {
+      const byId = await this.roleModel.findById(user.roleId).exec();
       if (byId) return byId;
     }
     if (user.role) {
-      return this.findByCode(String(user.role));
+      return this.roleModel
+        .findOne({ code: String(user.role).toUpperCase() })
+        .exec();
     }
     return null;
   }

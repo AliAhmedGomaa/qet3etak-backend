@@ -9,11 +9,8 @@ import {
   UserStatus,
   isAdminPanelRole,
 } from '../../common/enums/user.enums';
-import { EMPLOYEE_ROLE, EmployeeStatus } from '../../common/enums/hr.enums';
-import {
-  DELIVERY_ROLE,
-  DeliveryGuyStatus,
-} from '../../common/enums/delivery.enums';
+import { EMPLOYEE_ROLE } from '../../common/enums/hr.enums';
+import { DELIVERY_ROLE } from '../../common/enums/delivery.enums';
 import { DeliveryGuy } from '../../delivery/schemas/delivery-guy.schema';
 import { Employee } from '../../hr/schemas/employee.schema';
 import { RolesService } from '../../roles/roles.service';
@@ -50,9 +47,6 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       if (!emp) {
         throw new UnauthorizedException('Employee no longer exists');
       }
-      if (emp.status === EmployeeStatus.TERMINATED) {
-        throw new UnauthorizedException('Employee account is terminated');
-      }
       return {
         userId: String(emp._id),
         phone: emp.phone,
@@ -67,9 +61,6 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       const guy = await this.deliveryGuyModel.findById(payload.sub).exec();
       if (!guy) {
         throw new UnauthorizedException('Delivery guy no longer exists');
-      }
-      if (guy.status !== DeliveryGuyStatus.ACTIVE) {
-        throw new UnauthorizedException('Delivery account is inactive');
       }
       return {
         userId: String(guy._id),

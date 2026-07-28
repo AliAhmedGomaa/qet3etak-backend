@@ -10,6 +10,11 @@ import {
   UserStatus,
   effectiveGuardRole,
 } from '../../common/enums/user.enums';
+import { EMPLOYEE_ROLE, EmployeeStatus } from '../../common/enums/hr.enums';
+import {
+  DELIVERY_ROLE,
+  DeliveryGuyStatus,
+} from '../../common/enums/delivery.enums';
 import { ROLES_KEY } from '../decorators/roles.decorator';
 import { REQUIRE_APPROVED_KEY } from '../decorators/require-approved.decorator';
 
@@ -63,6 +68,26 @@ export class RolesGuard implements CanActivate {
       if (!allowed) {
         throw new ForbiddenException('Insufficient role');
       }
+    }
+
+    // Portal accounts must be ACTIVE to use business APIs (/auth/me still works).
+    if (
+      (user.kind === 'employee' || user.role === EMPLOYEE_ROLE) &&
+      user.status !== EmployeeStatus.ACTIVE
+    ) {
+      throw new ForbiddenException({
+        code: 'ACCOUNT_INACTIVE',
+        message: 'الحساب غير نشط — تواصل مع الإدارة',
+      });
+    }
+    if (
+      (user.kind === 'delivery' || user.role === DELIVERY_ROLE) &&
+      user.status !== DeliveryGuyStatus.ACTIVE
+    ) {
+      throw new ForbiddenException({
+        code: 'ACCOUNT_INACTIVE',
+        message: 'الحساب غير نشط — تواصل مع الإدارة',
+      });
     }
 
     // Block PENDING / REJECTED / SUSPENDED shop owners from wholesale (and any @RequireApproved) routes

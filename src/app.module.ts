@@ -31,6 +31,7 @@ import { RolesModule } from './roles/roles.module';
 import { RolesService } from './roles/roles.service';
 import { HrModule } from './hr/hr.module';
 import { BrandingModule } from './branding/branding.module';
+import { RepairModule } from './repair/repair.module';
 
 @Module({
   imports: [
@@ -68,6 +69,7 @@ import { BrandingModule } from './branding/branding.module';
     ImportModule,
     ReturnsModule,
     ReportsModule,
+    RepairModule,
   ],
   controllers: [HealthController],
 })

@@ -5,7 +5,6 @@ import {
   Injectable,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import { UserRole } from '../../common/enums/user.enums';
 import { hasPermission } from '../../common/permissions';
 import {
   PERMISSIONS_KEY,
@@ -39,7 +38,6 @@ export class PermissionsGuard implements CanActivate {
 
     const ok = hasPermission(user.permissions, required, {
       requireAll: mode === 'all',
-      isAdmin: user.role === UserRole.ADMIN,
     });
     if (!ok) {
       throw new ForbiddenException({

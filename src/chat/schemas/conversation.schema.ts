@@ -3,12 +3,28 @@ import { HydratedDocument, Types } from 'mongoose';
 
 export type ConversationDocument = HydratedDocument<Conversation>;
 
+export type ChatParticipantKind = 'SHOP' | 'EMPLOYEE';
+
 @Schema({ timestamps: true, collection: 'chat_conversations' })
 export class Conversation {
-  /** One conversation per shop owner. */
-  @Prop({ type: Types.ObjectId, ref: 'User', required: true, unique: true, index: true })
+  /**
+   * Thread participant id:
+   * - SHOP → shop-owner User._id
+   * - EMPLOYEE → Employee._id
+   * Kept as `shopId` for backward compatibility with existing shop threads.
+   */
+  @Prop({ type: Types.ObjectId, required: true, unique: true, index: true })
   shopId!: Types.ObjectId;
 
+  @Prop({
+    type: String,
+    enum: ['SHOP', 'EMPLOYEE'],
+    default: 'SHOP',
+    index: true,
+  })
+  kind!: ChatParticipantKind;
+
+  /** Display name (shop name or employee full name). */
   @Prop({ trim: true, default: '' })
   shopName!: string;
 
@@ -18,11 +34,11 @@ export class Conversation {
   @Prop({ type: Date, default: null })
   lastMessageAt!: Date | null;
 
-  /** Unread messages waiting for the admin to read (sent by the shop). */
+  /** Unread messages waiting for the admin to read. */
   @Prop({ default: 0, min: 0 })
   unreadForAdmin!: number;
 
-  /** Unread messages waiting for the shop to read (sent by the admin). */
+  /** Unread messages waiting for the shop/employee to read. */
   @Prop({ default: 0, min: 0 })
   unreadForShop!: number;
 }
@@ -30,6 +46,7 @@ export class Conversation {
 export const ConversationSchema = SchemaFactory.createForClass(Conversation);
 
 ConversationSchema.index({ lastMessageAt: -1 });
+ConversationSchema.index({ kind: 1, lastMessageAt: -1 });
 
 ConversationSchema.set('toJSON', {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

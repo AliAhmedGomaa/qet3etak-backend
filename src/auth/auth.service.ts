@@ -13,11 +13,8 @@ import {
   UserStatus,
   isAdminPanelRole,
 } from '../common/enums/user.enums';
-import { EMPLOYEE_ROLE, EmployeeStatus } from '../common/enums/hr.enums';
-import {
-  DELIVERY_ROLE,
-  DeliveryGuyStatus,
-} from '../common/enums/delivery.enums';
+import { EMPLOYEE_ROLE } from '../common/enums/hr.enums';
+import { DELIVERY_ROLE } from '../common/enums/delivery.enums';
 import { absoluteMediaUrl } from '../common/media-url';
 import { DeliveryGuy } from '../delivery/schemas/delivery-guy.schema';
 import { Employee } from '../hr/schemas/employee.schema';
@@ -88,13 +85,6 @@ export class AuthService {
     if (!ok) {
       throw new UnauthorizedException('Invalid phone or password');
     }
-    if (user.status === UserStatus.SUSPENDED) {
-      throw new UnauthorizedException({
-        code: 'SUSPENDED',
-        message:
-          'Account suspended / الحساب موقوف — تواصل مع الإدارة لإعادة التفعيل',
-      });
-    }
     return this.tokenResponse(user);
   }
 
@@ -111,12 +101,6 @@ export class AuthService {
     const ok = await bcrypt.compare(dto.password, emp.passwordHash);
     if (!ok) {
       throw new UnauthorizedException('Invalid phone or password');
-    }
-    if (emp.status === EmployeeStatus.TERMINATED) {
-      throw new UnauthorizedException({
-        code: 'TERMINATED',
-        message: 'الحساب منتهي — تواصل مع الإدارة',
-      });
     }
     const payload = {
       sub: String(emp._id),
@@ -156,12 +140,6 @@ export class AuthService {
     if (!ok) {
       throw new UnauthorizedException('Invalid phone or password');
     }
-    if (guy.status !== DeliveryGuyStatus.ACTIVE) {
-      throw new UnauthorizedException({
-        code: 'INACTIVE',
-        message: 'الحساب غير نشط — تواصل مع الإدارة',
-      });
-    }
     const payload = {
       sub: String(guy._id),
       phone: guy.phone,
@@ -182,9 +160,6 @@ export class AuthService {
   async deliveryMe(deliveryGuyId: string): Promise<Record<string, unknown>> {
     const guy = await this.deliveryGuyModel.findById(deliveryGuyId).exec();
     if (!guy) throw new UnauthorizedException('Delivery guy no longer exists');
-    if (guy.status !== DeliveryGuyStatus.ACTIVE) {
-      throw new UnauthorizedException('Delivery account is inactive');
-    }
     const json = guy.toJSON() as unknown as Record<string, unknown>;
     return { ...json, role: DELIVERY_ROLE, kind: 'delivery' };
   }

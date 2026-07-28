@@ -1,5 +1,6 @@
 import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { InjectModel } from '@nestjs/mongoose';
 import { JwtService } from '@nestjs/jwt';
 import {
   OnGatewayConnection,
@@ -10,9 +11,12 @@ import {
   MessageBody,
   ConnectedSocket,
 } from '@nestjs/websockets';
+import { Model } from 'mongoose';
 import { Server, Socket } from 'socket.io';
 import { UserRole, isAdminPanelRole } from '../common/enums/user.enums';
+import { EMPLOYEE_ROLE } from '../common/enums/hr.enums';
 import { buildCorsOptions } from '../common/cors';
+import { Employee } from '../hr/schemas/employee.schema';
 import { UsersService } from '../users/users.service';
 import {
   ADMIN_ROOM,
@@ -21,11 +25,14 @@ import {
   shopRoom,
   shopViewRoom,
 } from './chat.service';
+import type { ChatParticipantKind } from './schemas/conversation.schema';
 
 interface SocketUser {
   userId: string;
-  role: UserRole | string;
+  role: string;
   shopName?: string;
+  fullName?: string;
+  kind: ChatParticipantKind | 'ADMIN';
 }
 
 type ChatSocket = Socket & { data: { user?: SocketUser } };
@@ -43,6 +50,8 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection {
     private readonly chatService: ChatService,
     private readonly jwtService: JwtService,
     private readonly usersService: UsersService,
+    @InjectModel(Employee.name)
+    private readonly employeeModel: Model<Employee>,
     private readonly config: ConfigService,
   ) {}
 
@@ -56,29 +65,56 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection {
       const token = this.extractToken(client);
       if (!token) throw new Error('Missing token');
 
-      const payload = this.jwtService.verify<{ sub: string }>(token, {
+      const payload = this.jwtService.verify<{
+        sub: string;
+        kind?: string;
+      }>(token, {
         secret: this.config.get<string>('JWT_SECRET', 'qet3etak-dev-secret'),
       });
-      const user = await this.usersService.findById(payload.sub);
-      if (!user) throw new Error('User no longer exists');
 
-      const socketUser: SocketUser = {
-        userId: String(user._id),
-        role: user.role,
-        shopName: user.shopName,
-      };
-      client.data.user = socketUser;
+      let socketUser: SocketUser;
 
-      if (isAdminPanelRole(socketUser.role)) {
-        await client.join(ADMIN_ROOM);
-      } else {
+      if (payload.kind === 'employee') {
+        const emp = await this.employeeModel.findById(payload.sub).exec();
+        if (!emp) throw new Error('Employee no longer exists');
+        socketUser = {
+          userId: String(emp._id),
+          role: EMPLOYEE_ROLE,
+          fullName: emp.fullName,
+          shopName: emp.fullName,
+          kind: 'EMPLOYEE',
+        };
         await client.join(shopRoom(socketUser.userId));
-        // Ensure the conversation exists so admins can see new shops.
         await this.chatService.getOrCreateConversation(
           socketUser.userId,
-          socketUser.shopName,
+          socketUser.fullName,
+          'EMPLOYEE',
         );
+      } else {
+        const user = await this.usersService.findById(payload.sub);
+        if (!user) throw new Error('User no longer exists');
+
+        socketUser = {
+          userId: String(user._id),
+          role: user.role,
+          shopName: user.shopName,
+          fullName: user.fullName,
+          kind: isAdminPanelRole(user.role) ? 'ADMIN' : 'SHOP',
+        };
+
+        if (isAdminPanelRole(socketUser.role)) {
+          await client.join(ADMIN_ROOM);
+        } else {
+          await client.join(shopRoom(socketUser.userId));
+          await this.chatService.getOrCreateConversation(
+            socketUser.userId,
+            socketUser.shopName,
+            'SHOP',
+          );
+        }
       }
+
+      client.data.user = socketUser;
     } catch (err) {
       this.logger.warn(
         `Rejected socket ${client.id}: ${(err as Error).message}`,
@@ -98,15 +134,27 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection {
     const text = (body?.text ?? '').trim();
     if (!text) return;
 
-    const shopId =
-      isAdminPanelRole(user.role) ? body?.shopId : user.userId;
+    const shopId = isAdminPanelRole(user.role) ? body?.shopId : user.userId;
     if (!shopId) return;
+
+    const kind: ChatParticipantKind =
+      user.kind === 'EMPLOYEE'
+        ? 'EMPLOYEE'
+        : user.kind === 'SHOP'
+          ? 'SHOP'
+          : ((await this.chatService.getConversation(shopId))?.['kind'] as
+              | ChatParticipantKind
+              | undefined) || 'SHOP';
 
     await this.chatService.sendMessage({
       shopId,
-      shopName: user.role === UserRole.SHOP_OWNER ? user.shopName : undefined,
+      shopName:
+        user.role === UserRole.SHOP_OWNER || user.role === EMPLOYEE_ROLE
+          ? user.shopName || user.fullName
+          : undefined,
+      kind,
       senderId: user.userId,
-      senderRole: user.role as UserRole,
+      senderRole: user.role,
       text,
     });
   }
@@ -120,13 +168,9 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection {
     if (!user) return;
     const shopId = isAdminPanelRole(user.role) ? body?.shopId : user.userId;
     if (!shopId) return;
-    await this.chatService.markRead(shopId, user.role as UserRole);
+    await this.chatService.markRead(shopId, user.role);
   }
 
-  /**
-   * Tracks whether a user is actively looking at a conversation so we can
-   * suppress redundant push notifications only for the open thread.
-   */
   @SubscribeMessage('chat:view')
   async onView(
     @ConnectedSocket() client: ChatSocket,
@@ -137,8 +181,9 @@ export class ChatGateway implements OnGatewayInit, OnGatewayConnection {
     const shopId = isAdminPanelRole(user.role) ? body?.shopId : user.userId;
     if (!shopId) return;
 
-    const room =
-      isAdminPanelRole(user.role) ? adminViewRoom(shopId) : shopViewRoom(shopId);
+    const room = isAdminPanelRole(user.role)
+      ? adminViewRoom(shopId)
+      : shopViewRoom(shopId);
 
     if (body?.active) {
       await client.join(room);
