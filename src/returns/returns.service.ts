@@ -81,6 +81,13 @@ export class ReturnsService {
       adminNote: '',
     });
 
+    await this.pushService.notifyAdmins({
+      title: 'طلب إرجاع جديد',
+      body: `${created.shopName} — ${created.orderNumber} (${created.refundAmount} ج.م)`,
+      url: '/returns',
+      tag: `return-new-${String(created._id)}`,
+    });
+
     return this.toView(created);
   }
 
@@ -209,7 +216,7 @@ export class ReturnsService {
     await this.pushService.notifyUser(String(req.shopId), {
       title: 'تم قبول طلب الإرجاع',
       body: `طلب إرجاع ${req.orderNumber} بمبلغ ${req.refundAmount} ج.م`,
-      url: `/returns`,
+      url: '/returns',
       tag: `return-approved-${req.id}`,
     });
 
@@ -236,7 +243,7 @@ export class ReturnsService {
     await this.pushService.notifyUser(String(req.shopId), {
       title: 'تم رفض طلب الإرجاع',
       body: `طلب إرجاع ${req.orderNumber}: ${req.adminNote}`,
-      url: `/returns`,
+      url: '/returns',
       tag: `return-rejected-${req.id}`,
     });
 

@@ -20,6 +20,7 @@ import {
   paginatedResult,
   type PaginatedResult,
 } from '../common/pagination';
+import { absoluteMediaUrl } from '../common/media-url';
 import { BrandsService } from '../brands/brands.service';
 import { OrdersService } from '../orders/orders.service';
 import { UsersService } from '../users/users.service';
@@ -89,11 +90,16 @@ export class RepairService {
       ...result,
       items: result.items.map((s) => {
         const json = s.toJSON() as unknown as Record<string, unknown>;
+        const app = (json.customerApp ?? {}) as Record<string, unknown>;
+        const logoRaw =
+          typeof app.logoUrl === 'string' ? app.logoUrl.trim() : '';
         return {
           id: json.id,
           shopName: json.shopName,
           city: json.city,
           address: json.address,
+          slug: typeof app.slug === 'string' ? app.slug : '',
+          logoUrl: logoRaw ? absoluteMediaUrl(logoRaw) : '',
           // Public: do not expose full phone; last 4 only
           phoneHint:
             typeof json.phone === 'string' && json.phone.length >= 4
@@ -102,6 +108,10 @@ export class RepairService {
         };
       }),
     };
+  }
+
+  getShopCustomerBranding(shopKey: string) {
+    return this.usersService.getPublicCustomerApp(shopKey);
   }
 
   async createByShop(

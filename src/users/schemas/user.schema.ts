@@ -4,6 +4,43 @@ import { UserRole, UserStatus } from '../../common/enums/user.enums';
 
 export type UserDocument = HydratedDocument<User>;
 
+/** White-label identity for this shop's customer (C2B) app experience. */
+@Schema({ _id: false })
+export class ShopCustomerAppBranding {
+  /** When false, customer portal falls back to platform branding. */
+  @Prop({ default: true })
+  enabled!: boolean;
+
+  @Prop({ trim: true, default: '' })
+  displayName!: string;
+
+  @Prop({ trim: true, default: '' })
+  tagline!: string;
+
+  /** Unique public slug for share links (?shop=slug). Sparse unique. */
+  @Prop({ trim: true, lowercase: true, default: '' })
+  slug!: string;
+
+  @Prop({ default: '#10b880' })
+  accentColor!: string;
+
+  @Prop({ default: '#0d9a6a' })
+  accentStrongColor!: string;
+
+  @Prop({ default: '#0f172a' })
+  brandColor!: string;
+
+  @Prop({ trim: true, default: '' })
+  logoUrl!: string;
+
+  @Prop({ trim: true, default: '' })
+  faviconUrl!: string;
+}
+
+export const ShopCustomerAppBrandingSchema = SchemaFactory.createForClass(
+  ShopCustomerAppBranding,
+);
+
 @Schema({ timestamps: true, collection: 'users' })
 export class User {
   @Prop({ required: true, trim: true })
@@ -65,9 +102,24 @@ export class User {
   /** Hashed password for JWT login */
   @Prop({ required: true, select: false })
   passwordHash!: string;
+
+  /** Customer-app (C2B) white-label identity — shop owner only. */
+  @Prop({ type: ShopCustomerAppBrandingSchema, default: () => ({}) })
+  customerApp!: ShopCustomerAppBranding;
 }
 
 export const UserSchema = SchemaFactory.createForClass(User);
+
+UserSchema.index(
+  { 'customerApp.slug': 1 },
+  {
+    unique: true,
+    sparse: true,
+    partialFilterExpression: {
+      'customerApp.slug': { $type: 'string', $gt: '' },
+    },
+  },
+);
 
 UserSchema.set('toJSON', {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

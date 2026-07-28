@@ -126,6 +126,14 @@ export class C2bRepairController {
     );
   }
 
+  @Get('shops/:shopKey/branding')
+  @ApiOperation({
+    summary: 'Public customer-app branding for a shop (id or slug)',
+  })
+  shopBranding(@Param('shopKey') shopKey: string) {
+    return this.repairService.getShopCustomerBranding(shopKey);
+  }
+
   @Get('track/:ticketNumber')
   @ApiOperation({ summary: 'Public live ticket status + timeline' })
   track(@Param('ticketNumber') ticketNumber: string) {

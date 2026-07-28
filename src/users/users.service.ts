@@ -12,6 +12,7 @@ import {
   UserStatus,
 } from '../common/enums/user.enums';
 import { withBranchFilter } from '../common/branch-scope';
+import { absoluteMediaUrl } from '../common/media-url';
 import {
   normalizePagination,
   paginatedResult,
@@ -440,5 +441,169 @@ export class UsersService {
       throw new BadRequestException('Role is inactive');
     }
     return { code: role.code, id: role._id as Types.ObjectId };
+  }
+
+  /** Resolve approved shop by Mongo id or customerApp.slug. */
+  async findApprovedShopByKey(shopKey: string): Promise<UserDocument> {
+    const key = shopKey?.trim();
+    if (!key) throw new NotFoundException('Shop not found');
+
+    let shop: UserDocument | null = null;
+    if (Types.ObjectId.isValid(key)) {
+      shop = await this.userModel
+        .findOne({
+          _id: new Types.ObjectId(key),
+          role: UserRole.SHOP_OWNER,
+          status: UserStatus.APPROVED,
+        })
+        .exec();
+    }
+    if (!shop) {
+      shop = await this.userModel
+        .findOne({
+          role: UserRole.SHOP_OWNER,
+          status: UserStatus.APPROVED,
+          'customerApp.slug': key.toLowerCase(),
+        })
+        .exec();
+    }
+    if (!shop) throw new NotFoundException('Shop not found');
+    return shop;
+  }
+
+  getCustomerAppView(shop: UserDocument): Record<string, unknown> {
+    const app = shop.customerApp ?? ({} as User['customerApp']);
+    const enabled = app.enabled !== false;
+    const displayName =
+      (app.displayName || '').trim() || shop.shopName || shop.fullName;
+    const logoUrl =
+      typeof app.logoUrl === 'string' && app.logoUrl
+        ? absoluteMediaUrl(app.logoUrl)
+        : '';
+    const faviconUrl =
+      typeof app.faviconUrl === 'string' && app.faviconUrl
+        ? absoluteMediaUrl(app.faviconUrl)
+        : logoUrl;
+    return {
+      shopId: String(shop._id),
+      shopName: shop.shopName,
+      city: shop.city,
+      address: shop.address,
+      enabled,
+      displayName,
+      tagline: (app.tagline || '').trim() || 'تتبع وإصلاح الأجهزة',
+      slug: (app.slug || '').trim(),
+      accentColor: app.accentColor || '#10b880',
+      accentStrongColor: app.accentStrongColor || '#0d9a6a',
+      brandColor: app.brandColor || '#0f172a',
+      logoUrl,
+      faviconUrl,
+      // Convenience aliases matching platform branding shape
+      appName: displayName,
+    };
+  }
+
+  async getOwnCustomerApp(shopId: string): Promise<Record<string, unknown>> {
+    const shop = await this.findShopByIdOrFail(shopId);
+    return this.getCustomerAppView(shop);
+  }
+
+  async getPublicCustomerApp(shopKey: string): Promise<Record<string, unknown>> {
+    const shop = await this.findApprovedShopByKey(shopKey);
+    const view = this.getCustomerAppView(shop);
+    if (view.enabled === false) {
+      throw new NotFoundException('Shop customer app is not enabled');
+    }
+    return view;
+  }
+
+  async updateOwnCustomerApp(
+    shopId: string,
+    data: {
+      enabled?: boolean;
+      displayName?: string;
+      tagline?: string;
+      slug?: string;
+      accentColor?: string;
+      accentStrongColor?: string;
+      brandColor?: string;
+    },
+  ): Promise<Record<string, unknown>> {
+    const shop = await this.findShopByIdOrFail(shopId);
+    if (!shop.customerApp) {
+      shop.customerApp = {
+        enabled: true,
+        displayName: '',
+        tagline: '',
+        slug: '',
+        accentColor: '#10b880',
+        accentStrongColor: '#0d9a6a',
+        brandColor: '#0f172a',
+        logoUrl: '',
+        faviconUrl: '',
+      };
+    }
+    const app = shop.customerApp;
+
+    if (data.enabled !== undefined) app.enabled = data.enabled;
+    if (data.displayName !== undefined) {
+      app.displayName = data.displayName.trim();
+    }
+    if (data.tagline !== undefined) app.tagline = data.tagline.trim();
+    if (data.accentColor !== undefined) {
+      app.accentColor = data.accentColor.toLowerCase();
+    }
+    if (data.accentStrongColor !== undefined) {
+      app.accentStrongColor = data.accentStrongColor.toLowerCase();
+    }
+    if (data.brandColor !== undefined) {
+      app.brandColor = data.brandColor.toLowerCase();
+    }
+    if (data.slug !== undefined) {
+      const slug = data.slug.trim().toLowerCase();
+      if (slug) {
+        const taken = await this.userModel
+          .exists({
+            'customerApp.slug': slug,
+            _id: { $ne: shop._id },
+          })
+          .exec();
+        if (taken) {
+          throw new ConflictException('هذا الرابط القصير مستخدم بالفعل');
+        }
+      }
+      app.slug = slug;
+    }
+
+    shop.markModified('customerApp');
+    await shop.save();
+    return this.getCustomerAppView(shop);
+  }
+
+  async setOwnCustomerAppLogo(
+    shopId: string,
+    relativePath: string,
+  ): Promise<Record<string, unknown>> {
+    const shop = await this.findShopByIdOrFail(shopId);
+    if (!shop.customerApp) {
+      shop.customerApp = {
+        enabled: true,
+        displayName: '',
+        tagline: '',
+        slug: '',
+        accentColor: '#10b880',
+        accentStrongColor: '#0d9a6a',
+        brandColor: '#0f172a',
+        logoUrl: '',
+        faviconUrl: '',
+      };
+    }
+    shop.customerApp.logoUrl = relativePath;
+    if (!shop.customerApp.faviconUrl) {
+      shop.customerApp.faviconUrl = relativePath;
+    }
+    shop.markModified('customerApp');
+    await shop.save();
+    return this.getCustomerAppView(shop);
   }
 }

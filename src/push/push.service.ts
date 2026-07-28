@@ -484,6 +484,11 @@ export class PushService implements OnModuleInit {
       return { sent: 0, failed: 0 };
     }
 
+    const url =
+      typeof payload.url === 'string' && payload.url.startsWith('/')
+        ? payload.url
+        : '/';
+
     const body = JSON.stringify({
       notification: {
         title: payload.title,
@@ -494,18 +499,20 @@ export class PushService implements OnModuleInit {
         renotify: true,
         requireInteraction: true,
         data: {
-          url: payload.url || '/',
+          url,
           onActionClick: {
             default: {
               operation: 'openWindow',
-              url: payload.url || '/',
+              url,
             },
           },
         },
       },
-      // Flat fallbacks some SWs read at the top level
+      // Flat fallbacks some SWs / clients read at the top level
       title: payload.title,
       body: payload.body,
+      url,
+      data: { url },
     });
 
     let sent = 0;

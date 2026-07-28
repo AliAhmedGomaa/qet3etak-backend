@@ -179,6 +179,13 @@ export class OrdersService {
     // Commercial invoice is issued at checkout (priced snapshot; 1 per order).
     await this.invoicesService.issueFromOrder(order);
 
+    await this.pushService.notifyAdmins({
+      title: 'طلب جديد',
+      body: `${order.orderNumber} — ${order.shopName} — ${order.total} ج.م`,
+      url: '/orders-board',
+      tag: `order-new-${String(order._id)}`,
+    });
+
     return order;
   }
 

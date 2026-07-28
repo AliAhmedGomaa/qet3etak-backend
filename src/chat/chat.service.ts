@@ -125,7 +125,7 @@ export class ChatService {
         const sent = await this.pushService.notifyAdmins({
           title: `رسالة من ${displayName} (${label})`,
           body: preview,
-          url: '/chat',
+          url: `/chat?shopId=${encodeURIComponent(input.shopId)}`,
           tag,
         });
         this.logger.log(

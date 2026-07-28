@@ -57,6 +57,14 @@ export class SpecialRequestsService {
       status: SpecialRequestStatus.PENDING,
       adminReply: '',
     });
+
+    await this.pushService.notifyAdmins({
+      title: 'طلب قطعة نادرة',
+      body: `${shop.shopName} — ${created.partName} (${created.deviceModel})`,
+      url: '/special-requests',
+      tag: `special-new-${String(created._id)}`,
+    });
+
     return this.toRequestView(created);
   }
 
@@ -145,7 +153,7 @@ export class SpecialRequestsService {
     await this.pushService.notifyUser(String(req.shopId), {
       title: 'تم تسعير طلبك الخاص',
       body: `${req.partName} — عرض سعر ${req.quotePrice} ر.س${arrival}`,
-      url: `/special-requests`,
+      url: '/special-requests',
       tag: `special-${req.id}`,
     });
 
@@ -160,7 +168,7 @@ export class SpecialRequestsService {
     await this.pushService.notifyUser(String(req.shopId), {
       title: 'تم توفير القطعة النادرة',
       body: `${req.partName} لـ ${req.deviceModel} جاهزة للتأكيد`,
-      url: `/special-requests`,
+      url: '/special-requests',
       tag: `special-done-${req.id}`,
     });
     return this.toRequestView(req);
