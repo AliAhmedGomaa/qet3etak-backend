@@ -18,7 +18,7 @@ export class ShopProduct {
   @Prop({ required: true, min: 0, default: 0 })
   price!: number;
 
-  @Prop({ trim: true, default: '' })
+  @Prop({ required: true, trim: true })
   imageUrl!: string;
 
   @Prop({ default: true, index: true })

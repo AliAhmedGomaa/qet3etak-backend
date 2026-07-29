@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -67,7 +68,7 @@ export class ShopProductsController {
         isActive: { type: 'boolean' },
         image: { type: 'string', format: 'binary' },
       },
-      required: ['title', 'price'],
+      required: ['title', 'price', 'image'],
     },
   })
   @UseInterceptors(
@@ -78,7 +79,10 @@ export class ShopProductsController {
     @Body() dto: CreateShopProductDto,
     @UploadedFile() file?: Express.Multer.File,
   ) {
-    return this.productsService.create(user.userId, dto, file?.filename);
+    if (!file?.filename) {
+      throw new BadRequestException('Product image upload is required');
+    }
+    return this.productsService.create(user.userId, dto, file.filename);
   }
 
   @Patch(':id')

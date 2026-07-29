@@ -4,8 +4,9 @@
  * Usage:
  *   npm run seed          # full seed if empty; if DB already has users,
  *                         # upserts delivery_guys (by phone), backfills
- *                         # missing invoices (by orderId), and upserts
- *                         # sample return_requests (by [SEED] reason key)
+ *                         # missing invoices (by orderId), upserts
+ *                         # sample return_requests (by [SEED] reason key),
+ *                         # and upserts shop_products for approved shops
  *   npm run seed:reset    # drop app collections and reseed from scratch
  *                         # (do NOT run against shared/production Atlas)
  */
@@ -72,6 +73,7 @@ const COLLECTIONS = [
   'chat_messages',
   'delivery_guys',
   'return_requests',
+  'shop_products',
 ] as const;
 
 /** Marker in reason — idempotent upsert key for seeded return requests. */
@@ -326,6 +328,135 @@ const CATEGORY_IMAGES: Record<string, string> = {
 
 function productImageFor(category: string): string {
   return CATEGORY_IMAGES[category] ?? PRODUCT_IMAGE;
+}
+
+/** Customer-app (C2B) shop products — upserted by shopId + seedKey. */
+const SHOP_PRODUCT_SEED_PREFIX = '[SEED]';
+
+const SEED_SHOP_PRODUCTS: Array<{
+  seedKey: string;
+  title: string;
+  description: string;
+  price: number;
+  imageUrl: string;
+  sortOrder: number;
+}> = [
+  {
+    seedKey: 'screen-iphone13',
+    title: 'شاشة iPhone 13 أصلية',
+    description: 'شاشة OLED أصلية مع إطار وتركيب مضمون.',
+    price: 1850,
+    imageUrl: CATEGORY_IMAGES.Screens!,
+    sortOrder: 1,
+  },
+  {
+    seedKey: 'battery-a54',
+    title: 'بطارية Samsung A54',
+    description: 'بطارية عالية الجودة مع ضمان 3 أشهر.',
+    price: 320,
+    imageUrl: CATEGORY_IMAGES.Batteries!,
+    sortOrder: 2,
+  },
+  {
+    seedKey: 'charging-typec',
+    title: 'منفذ شحن Type-C',
+    description: 'منفذ شحن مع ميكروفون — متوافق مع أغلب أجهزة أندرويد.',
+    price: 180,
+    imageUrl: CATEGORY_IMAGES['Charging Ports']!,
+    sortOrder: 3,
+  },
+  {
+    seedKey: 'cover-iphone14',
+    title: 'غطاء خلفي iPhone 14',
+    description: 'غطاء زجاجي مع فتحات الكاميرا دقيقة.',
+    price: 450,
+    imageUrl: CATEGORY_IMAGES['Back Covers']!,
+    sortOrder: 4,
+  },
+  {
+    seedKey: 'camera-s23',
+    title: 'كاميرا خلفية Galaxy S23',
+    description: 'وحدة كاميرا رئيسية أصلية عالية الدقة.',
+    price: 980,
+    imageUrl: CATEGORY_IMAGES.Cameras!,
+    sortOrder: 5,
+  },
+  {
+    seedKey: 'flex-power',
+    title: 'فلكس زر الباور',
+    description: 'كابل فلكس لزر التشغيل والحجم.',
+    price: 95,
+    imageUrl: CATEGORY_IMAGES['Flex Cables']!,
+    sortOrder: 6,
+  },
+  {
+    seedKey: 'speaker-loud',
+    title: 'سماعة خارجية عامة',
+    description: 'سماعة رنين عالية الجودة لمعظم الموديلات.',
+    price: 140,
+    imageUrl: CATEGORY_IMAGES.Speakers!,
+    sortOrder: 7,
+  },
+  {
+    seedKey: 'tools-kit',
+    title: 'طقم أدوات فتح الموبايل',
+    description: 'طقم مفكات وملاقط لفك وتركيب الأجهزة.',
+    price: 220,
+    imageUrl: CATEGORY_IMAGES.Tools!,
+    sortOrder: 8,
+  },
+];
+
+async function upsertShopProducts(db: NonNullable<typeof mongoose.connection.db>): Promise<{
+  shops: number;
+  upserted: number;
+}> {
+  const users = db.collection('users');
+  const shopProductsCol = db.collection('shop_products');
+  const shops = await users
+    .find({
+      role: UserRole.SHOP_OWNER,
+      status: UserStatus.APPROVED,
+    })
+    .project({ _id: 1 })
+    .toArray();
+
+  let upserted = 0;
+  const now = new Date();
+  for (const shop of shops) {
+    const shopId = shop._id as Types.ObjectId;
+    for (const item of SEED_SHOP_PRODUCTS) {
+      const result = await shopProductsCol.updateOne(
+        {
+          shopId,
+          seedKey: `${SHOP_PRODUCT_SEED_PREFIX}${item.seedKey}`,
+        },
+        {
+          $setOnInsert: {
+            shopId,
+            seedKey: `${SHOP_PRODUCT_SEED_PREFIX}${item.seedKey}`,
+            createdAt: now,
+          },
+          $set: {
+            title: item.title,
+            description: item.description,
+            price: item.price,
+            imageUrl: item.imageUrl,
+            isActive: true,
+            sortOrder: item.sortOrder,
+            updatedAt: now,
+          },
+        },
+        { upsert: true },
+      );
+      if (result.upsertedCount > 0 || result.modifiedCount > 0) upserted++;
+    }
+  }
+
+  await shopProductsCol.createIndex({ shopId: 1, seedKey: 1 }, { unique: true, sparse: true });
+  await shopProductsCol.createIndex({ shopId: 1, isActive: 1, sortOrder: 1 });
+
+  return { shops: shops.length, upserted };
 }
 
 async function upsertDeliveryGuys(
@@ -1178,7 +1309,6 @@ async function main(): Promise<void> {
         {
           $setOnInsert: {
             code: seed.code,
-            isSystem: true,
             createdAt: now,
           },
           $set: {
@@ -1274,6 +1404,12 @@ async function main(): Promise<void> {
         `  by status: ${Object.entries(ret.byStatus)
           .map(([s, n]) => `${s}=${n}`)
           .join(', ') || 'none'}`,
+      );
+
+      console.log('Upserting customer-app shop products (additive)...');
+      const sp = await upsertShopProducts(db);
+      console.log(
+        `  shop products: ${sp.upserted} upserted across ${sp.shops} approved shops`,
       );
 
       await mongoose.disconnect();
@@ -1466,6 +1602,12 @@ async function main(): Promise<void> {
   const products = buildProducts(qualityByGrade);
   await replaceDocs(productsCol, products);
   console.log(`  ${products.length} products`);
+
+  console.log('Seeding customer-app shop products...');
+  const shopProductsSeed = await upsertShopProducts(db);
+  console.log(
+    `  shop products: ${shopProductsSeed.upserted} upserted across ${shopProductsSeed.shops} shops`,
+  );
 
   type WalletTx = {
     _id: Types.ObjectId;
@@ -1756,6 +1898,9 @@ async function main(): Promise<void> {
   console.log(`  Categories:       ${categoryDocs.length}`);
   console.log(`  Qualities:        ${qualityDocs.length}`);
   console.log(`  Products:         ${products.length}`);
+  console.log(
+    `  Shop products:    ${shopProductsSeed.upserted} (${shopProductsSeed.shops} shops)`,
+  );
   console.log(`  Orders:           ${orderDocs.length}`);
   console.log(`  Invoices:         ${invoiceCount}`);
   console.log(`  Wallets:          ${walletDocs.length}`);

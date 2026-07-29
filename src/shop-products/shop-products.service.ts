@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ForbiddenException,
   Injectable,
   NotFoundException,
@@ -85,8 +86,11 @@ export class ShopProductsService {
   async create(
     shopId: string,
     dto: CreateShopProductDto,
-    imageFilename?: string,
+    imageFilename: string,
   ): Promise<Record<string, unknown>> {
+    if (!imageFilename?.trim()) {
+      throw new BadRequestException('Product image upload is required');
+    }
     const created = await this.productModel.create({
       shopId: new Types.ObjectId(shopId),
       title: dto.title.trim(),
@@ -94,7 +98,7 @@ export class ShopProductsService {
       price: Number(dto.price) || 0,
       sortOrder: dto.sortOrder ?? 0,
       isActive: dto.isActive !== false,
-      imageUrl: imageFilename ? `/uploads/${imageFilename}` : '',
+      imageUrl: `/uploads/${imageFilename}`,
     });
     return this.toView(created);
   }
@@ -114,6 +118,9 @@ export class ShopProductsService {
     if (dto.sortOrder !== undefined) product.sortOrder = Number(dto.sortOrder) || 0;
     if (dto.isActive !== undefined) product.isActive = dto.isActive;
     if (imageFilename) product.imageUrl = `/uploads/${imageFilename}`;
+    if (!product.imageUrl?.trim()) {
+      throw new BadRequestException('Product image is required');
+    }
     await product.save();
     return this.toView(product);
   }
@@ -145,6 +152,7 @@ export class ShopProductsService {
       typeof json.imageUrl === 'string' && json.imageUrl
         ? absoluteMediaUrl(json.imageUrl)
         : '';
+    delete json.seedKey;
     return { ...json, imageUrl };
   }
 }
