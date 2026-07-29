@@ -39,13 +39,12 @@ export class CategoriesService implements OnModuleInit {
   ) {}
 
   async onModuleInit(): Promise<void> {
+    // Seed defaults only when the collection is empty — do not resurrect
+    // categories an admin intentionally deleted (serverless cold starts).
+    const count = await this.categoryModel.estimatedDocumentCount().exec();
+    if (count > 0) return;
+
     for (const item of DEFAULT_CATEGORIES) {
-      const exists = await this.categoryModel
-        .findOne({ name: item.name })
-        .select('_id')
-        .lean()
-        .exec();
-      if (exists) continue;
       try {
         await this.categoryModel.create({ ...item, isActive: true });
       } catch (err: unknown) {

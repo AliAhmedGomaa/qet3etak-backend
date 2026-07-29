@@ -35,13 +35,12 @@ export class BrandsService implements OnModuleInit {
   ) {}
 
   async onModuleInit(): Promise<void> {
+    // Seed defaults only on a fresh empty DB. Never re-create brands that an
+    // admin deleted — Vercel cold starts must not resurrect them.
+    const count = await this.brandModel.estimatedDocumentCount().exec();
+    if (count > 0) return;
+
     for (const item of DEFAULT_BRANDS) {
-      const exists = await this.brandModel
-        .findOne({ name: item.name })
-        .select('_id')
-        .lean()
-        .exec();
-      if (exists) continue;
       try {
         await this.brandModel.create({ ...item, isActive: true });
       } catch (err: unknown) {

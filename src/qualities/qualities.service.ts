@@ -76,18 +76,12 @@ export class QualitiesService implements OnModuleInit {
   }
 
   private async seedDefaults(): Promise<void> {
+    // Only bootstrap an empty qualities collection. Missing individual
+    // defaults after an admin delete must stay deleted across cold starts.
+    const count = await this.qualityModel.estimatedDocumentCount().exec();
+    if (count > 0) return;
+
     for (const item of DEFAULT_QUALITIES) {
-      const exists = await this.qualityModel
-        .findOne({
-          $or: [
-            { name: item.name },
-            { code: item.code },
-          ],
-        })
-        .select('_id')
-        .lean()
-        .exec();
-      if (exists) continue;
       try {
         await this.qualityModel.create({ ...item, isActive: true });
       } catch (err: unknown) {
