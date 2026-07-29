@@ -1,6 +1,9 @@
 /**
  * Database seeder — populates MongoDB with realistic demo data.
  *
+ * Catalog defaults (brands, categories, qualities, products, shops, …)
+ * are created ONLY by this script — never on API boot / cold start.
+ *
  * Usage:
  *   npm run seed          # full seed if empty; if DB already has users,
  *                         # upserts delivery_guys (by phone), backfills

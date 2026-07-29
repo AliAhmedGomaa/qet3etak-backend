@@ -6,7 +6,6 @@ import {
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, PipelineStage, Types } from 'mongoose';
-import { QualityGrade } from '../common/enums/product.enums';
 import { absoluteMediaUrl } from '../common/media-url';
 import {
   normalizePagination,
@@ -52,23 +51,8 @@ export class ProductsService implements OnModuleInit {
   ) {}
 
   async onModuleInit(): Promise<void> {
-    const count = await this.productModel.countDocuments();
-    if (count === 0) {
-      const seeded: Array<Record<string, unknown>> = [];
-      for (const item of SEED_PRODUCTS) {
-        const resolved = await this.qualitiesService.resolveForProduct({
-          qualityGrade: item.qualityGrade,
-          requireActive: false,
-        });
-        seeded.push({
-          ...item,
-          qualityId: resolved.qualityId,
-          qualityGrade: resolved.qualityGrade,
-        });
-      }
-      await this.productModel.insertMany(seeded);
-    }
-    // Backfill missing part names from title/model for older documents
+    // Backfill missing part names from title/model for older documents.
+    // Catalog data is seeded only via `npm run seed`, never on boot.
     const missing = await this.productModel
       .find({
         $or: [{ part: { $exists: false } }, { part: null }, { part: '' }],
@@ -558,102 +542,3 @@ export class ProductsService implements OnModuleInit {
     });
   }
 }
-
-const SEED_PRODUCTS = [
-  {
-    title: 'iPhone 14 LCD Assembly',
-    brand: 'Apple',
-    model: 'iPhone 14',
-    category: 'Screens',
-    part: 'LCD Assembly',
-    qualityGrade: QualityGrade.Original,
-    stockQuantity: 42,
-    basePrice: 85,
-    tieredPricing: [
-      { minQty: 5, price: 78 },
-      { minQty: 20, price: 72 },
-    ],
-    imageUrl: '/uploads/product-placeholder.png',
-    sku: 'SCR-IP14-ORG',
-    isActive: true,
-  },
-  {
-    title: 'iPhone 14 LCD Assembly',
-    brand: 'Apple',
-    model: 'iPhone 14',
-    category: 'Screens',
-    part: 'LCD Assembly',
-    qualityGrade: QualityGrade.HighCopy,
-    stockQuantity: 3,
-    basePrice: 45,
-    tieredPricing: [
-      { minQty: 5, price: 40 },
-      { minQty: 10, price: 36 },
-    ],
-    imageUrl: '/uploads/product-placeholder.png',
-    sku: 'SCR-IP14-HC',
-    isActive: true,
-  },
-  {
-    title: 'Samsung S23 Battery',
-    brand: 'Samsung',
-    model: 'Galaxy S23',
-    category: 'Batteries',
-    part: 'Battery Pack',
-    qualityGrade: QualityGrade.Original,
-    stockQuantity: 120,
-    basePrice: 28,
-    tieredPricing: [
-      { minQty: 10, price: 24 },
-      { minQty: 50, price: 21 },
-    ],
-    imageUrl: '/uploads/product-placeholder.png',
-    sku: 'BAT-S23-ORG',
-    isActive: true,
-  },
-  {
-    title: 'Xiaomi Redmi Note 12 Charging Port',
-    brand: 'Xiaomi',
-    model: 'Redmi Note 12',
-    category: 'Charging Ports',
-    part: 'Charging Port Flex',
-    qualityGrade: QualityGrade.Copy,
-    stockQuantity: 8,
-    basePrice: 6.5,
-    tieredPricing: [{ minQty: 20, price: 5.2 }],
-    imageUrl: '/uploads/product-placeholder.png',
-    sku: 'CHG-RN12-CPY',
-    isActive: true,
-  },
-  {
-    title: 'Huawei P30 Back Glass',
-    brand: 'Huawei',
-    model: 'P30',
-    category: 'Back Covers',
-    part: 'Rear Glass Panel',
-    qualityGrade: QualityGrade.Used,
-    stockQuantity: 0,
-    basePrice: 12,
-    tieredPricing: [],
-    imageUrl: '/uploads/product-placeholder.png',
-    sku: 'BCK-P30-USED',
-    isActive: true,
-  },
-  {
-    title: 'iPhone 13 Camera Lens',
-    brand: 'Apple',
-    model: 'iPhone 13',
-    category: 'Cameras',
-    part: 'Back Camera Lens',
-    qualityGrade: QualityGrade.HighCopy,
-    stockQuantity: 55,
-    basePrice: 9,
-    tieredPricing: [
-      { minQty: 5, price: 8 },
-      { minQty: 25, price: 6.5 },
-    ],
-    imageUrl: '/uploads/product-placeholder.png',
-    sku: 'CAM-IP13-HC',
-    isActive: true,
-  },
-];

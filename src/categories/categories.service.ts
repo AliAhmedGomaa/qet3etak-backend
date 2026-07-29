@@ -2,7 +2,6 @@ import {
   ConflictException,
   Injectable,
   NotFoundException,
-  OnModuleInit,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
@@ -15,44 +14,11 @@ import { absoluteMediaUrl } from '../common/media-url';
 import { CreateCategoryDto, UpdateCategoryDto } from './dto/category.dto';
 import { Category, CategoryDocument } from './schemas/category.schema';
 
-const DEFAULT_CATEGORIES: Array<{
-  name: string;
-  iconUrl: string;
-  sortOrder: number;
-}> = [
-  { name: 'Screens', iconUrl: '', sortOrder: 1 },
-  { name: 'Batteries', iconUrl: '', sortOrder: 2 },
-  { name: 'Charging Ports', iconUrl: '', sortOrder: 3 },
-  { name: 'Back Covers', iconUrl: '', sortOrder: 4 },
-  { name: 'Cameras', iconUrl: '', sortOrder: 5 },
-  { name: 'Speakers', iconUrl: '', sortOrder: 6 },
-  { name: 'Flex Cables', iconUrl: '', sortOrder: 7 },
-  { name: 'Buttons', iconUrl: '', sortOrder: 8 },
-  { name: 'Adhesives', iconUrl: '', sortOrder: 9 },
-  { name: 'Tools', iconUrl: '', sortOrder: 10 },
-];
-
 @Injectable()
-export class CategoriesService implements OnModuleInit {
+export class CategoriesService {
   constructor(
     @InjectModel(Category.name) private readonly categoryModel: Model<Category>,
   ) {}
-
-  async onModuleInit(): Promise<void> {
-    // Seed defaults only when the collection is empty — do not resurrect
-    // categories an admin intentionally deleted (serverless cold starts).
-    const count = await this.categoryModel.estimatedDocumentCount().exec();
-    if (count > 0) return;
-
-    for (const item of DEFAULT_CATEGORIES) {
-      try {
-        await this.categoryModel.create({ ...item, isActive: true });
-      } catch (err: unknown) {
-        const code = (err as { code?: number })?.code;
-        if (code !== 11000) throw err;
-      }
-    }
-  }
 
   async listAll(
     page?: number,

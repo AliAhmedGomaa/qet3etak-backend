@@ -3,7 +3,6 @@ import {
   ConflictException,
   Injectable,
   NotFoundException,
-  OnModuleInit,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
@@ -13,41 +12,9 @@ import {
   paginatedResult,
   type PaginatedResult,
 } from '../common/pagination';
-import { Product, ProductDocument } from '../products/schemas/product.schema';
+import { Product } from '../products/schemas/product.schema';
 import { CreateQualityDto, UpdateQualityDto } from './dto/quality.dto';
 import { Quality, QualityDocument } from './schemas/quality.schema';
-
-const DEFAULT_QUALITIES: Array<{
-  name: string;
-  code: string;
-  description: string;
-  sortOrder: number;
-}> = [
-  {
-    name: QualityGrade.Original,
-    code: 'original',
-    description: 'Genuine / original manufacturer quality',
-    sortOrder: 1,
-  },
-  {
-    name: QualityGrade.HighCopy,
-    code: 'high-copy',
-    description: 'High-quality aftermarket / high copy',
-    sortOrder: 2,
-  },
-  {
-    name: QualityGrade.Copy,
-    code: 'copy',
-    description: 'Standard aftermarket copy',
-    sortOrder: 3,
-  },
-  {
-    name: QualityGrade.Used,
-    code: 'used',
-    description: 'Used / refurbished',
-    sortOrder: 4,
-  },
-];
 
 /** Canonical names for common import aliases. */
 const QUALITY_ALIASES: Record<string, string> = {
@@ -64,57 +31,11 @@ const QUALITY_ALIASES: Record<string, string> = {
 };
 
 @Injectable()
-export class QualitiesService implements OnModuleInit {
+export class QualitiesService {
   constructor(
     @InjectModel(Quality.name) private readonly qualityModel: Model<Quality>,
     @InjectModel(Product.name) private readonly productModel: Model<Product>,
   ) {}
-
-  async onModuleInit(): Promise<void> {
-    await this.seedDefaults();
-    await this.backfillFromProducts();
-  }
-
-  private async seedDefaults(): Promise<void> {
-    // Only bootstrap an empty qualities collection. Missing individual
-    // defaults after an admin delete must stay deleted across cold starts.
-    const count = await this.qualityModel.estimatedDocumentCount().exec();
-    if (count > 0) return;
-
-    for (const item of DEFAULT_QUALITIES) {
-      try {
-        await this.qualityModel.create({ ...item, isActive: true });
-      } catch (err: unknown) {
-        const code = (err as { code?: number })?.code;
-        if (code !== 11000) throw err;
-      }
-    }
-  }
-
-  /** Ensure a Quality row exists for every distinct product.qualityGrade and link qualityId. */
-  private async backfillFromProducts(): Promise<void> {
-    const grades = await this.productModel.distinct('qualityGrade').exec();
-    for (const raw of grades) {
-      const name = typeof raw === 'string' ? raw.trim() : '';
-      if (!name) continue;
-      await this.findOrCreateByName(name);
-    }
-
-    const missing = await this.productModel
-      .find({
-        $or: [{ qualityId: { $exists: false } }, { qualityId: null }],
-        qualityGrade: { $exists: true, $nin: [null, ''] },
-      })
-      .select('_id qualityGrade')
-      .exec();
-
-    for (const doc of missing as ProductDocument[]) {
-      const quality = await this.findByName(doc.qualityGrade);
-      if (!quality) continue;
-      doc.qualityId = quality._id as Types.ObjectId;
-      await doc.save();
-    }
-  }
 
   async listAll(
     page?: number,
