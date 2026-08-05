@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import type { Server } from 'socket.io';
@@ -9,6 +9,7 @@ import { ChatMessage } from './schemas/message.schema';
 import {
   ChatParticipantKind,
   Conversation,
+  ConversationDocument,
 } from './schemas/conversation.schema';
 
 export const ADMIN_ROOM = 'admins';
@@ -35,6 +36,22 @@ function view(doc: { toJSON: () => unknown }): Record<string, unknown> {
   return doc.toJSON() as Record<string, unknown>;
 }
 
+function isDuplicateKeyError(err: unknown): boolean {
+  return (
+    typeof err === 'object' &&
+    err !== null &&
+    'code' in err &&
+    (err as { code?: number }).code === 11000
+  );
+}
+
+function requireObjectId(id: string, label: string): Types.ObjectId {
+  if (!Types.ObjectId.isValid(id)) {
+    throw new BadRequestException(`Invalid ${label}`);
+  }
+  return new Types.ObjectId(id);
+}
+
 @Injectable()
 export class ChatService {
   private readonly logger = new Logger(ChatService.name);
@@ -54,47 +71,36 @@ export class ChatService {
   }
 
   async sendMessage(input: SendMessageInput): Promise<Record<string, unknown>> {
-    const shopObjectId = new Types.ObjectId(input.shopId);
+    const shopObjectId = requireObjectId(input.shopId, 'chat participant id');
+    const senderObjectId = requireObjectId(input.senderId, 'sender id');
     const text = input.text.trim();
     const fromParticipant = isChatParticipantRole(input.senderRole);
+    const kind: ChatParticipantKind = input.kind || 'SHOP';
 
     const message = await this.messageModel.create({
       shopId: shopObjectId,
-      senderId: new Types.ObjectId(input.senderId),
+      senderId: senderObjectId,
       senderRole: input.senderRole,
       text,
       read: false,
     });
 
-    const update: Record<string, unknown> = {
+    const $set: Record<string, unknown> = {
       lastMessage: text,
       lastMessageAt: new Date(),
-      $inc: fromParticipant ? { unreadForAdmin: 1 } : { unreadForShop: 1 },
+      kind,
     };
-    if (input.shopName) update['shopName'] = input.shopName;
-    if (input.kind) update['kind'] = input.kind;
+    if (input.shopName) $set['shopName'] = input.shopName;
 
-    const conversation = await this.conversationModel
-      .findOneAndUpdate({ shopId: shopObjectId }, update, {
-        upsert: true,
-        new: true,
-        setDefaultsOnInsert: true,
-      })
-      .exec();
-
-    // Ensure kind is set on insert when only admin replies first.
-    if (input.kind && conversation && conversation.kind !== input.kind) {
-      conversation.kind = input.kind;
-      await conversation.save();
-    }
+    const conversation = await this.upsertConversation(shopObjectId, {
+      $set,
+      $inc: fromParticipant ? { unreadForAdmin: 1 } : { unreadForShop: 1 },
+      $setOnInsert: { shopId: shopObjectId },
+    });
 
     const messageView = view(message);
     const displayName =
       (conversation?.shopName as string) || input.shopName || 'محادثة';
-    const kind: ChatParticipantKind =
-      (conversation?.kind as ChatParticipantKind) ||
-      input.kind ||
-      'SHOP';
 
     await this.pushToRecipient(input, displayName, text, kind);
 
@@ -148,8 +154,9 @@ export class ChatService {
   }
 
   async getMessages(shopId: string): Promise<Record<string, unknown>[]> {
+    const shopObjectId = requireObjectId(shopId, 'chat participant id');
     const messages = await this.messageModel
-      .find({ shopId: new Types.ObjectId(shopId) })
+      .find({ shopId: shopObjectId })
       .sort({ createdAt: 1 })
       .limit(500)
       .exec();
@@ -161,19 +168,53 @@ export class ChatService {
     shopName?: string,
     kind: ChatParticipantKind = 'SHOP',
   ): Promise<Record<string, unknown>> {
-    const shopObjectId = new Types.ObjectId(shopId);
-    const conversation = await this.conversationModel
-      .findOneAndUpdate(
-        { shopId: shopObjectId },
-        {
-          $setOnInsert: { shopId: shopObjectId, kind },
-          ...(shopName ? { shopName } : {}),
-          ...(kind ? { kind } : {}),
-        },
-        { upsert: true, new: true, setDefaultsOnInsert: true },
-      )
-      .exec();
+    const shopObjectId = requireObjectId(shopId, 'chat participant id');
+    const $set: Record<string, unknown> = { kind };
+    if (shopName) $set['shopName'] = shopName;
+
+    // Use disjoint operator paths only — mixing `$setOnInsert.kind` with
+    // `$set.kind` (or bare fields Mongoose wraps as `$set`) makes MongoDB
+    // reject the update with ConflictingUpdateOperators → HTTP 500.
+    const conversation = await this.upsertConversation(shopObjectId, {
+      $setOnInsert: { shopId: shopObjectId },
+      $set,
+    });
     return view(conversation!);
+  }
+
+  /**
+   * Upsert a conversation, retrying once on unique-index races when the
+   * socket connect and REST thread load create the same thread together.
+   */
+  private async upsertConversation(
+    shopObjectId: Types.ObjectId,
+    update: Record<string, unknown>,
+  ): Promise<ConversationDocument | null> {
+    try {
+      return await this.conversationModel
+        .findOneAndUpdate({ shopId: shopObjectId }, update, {
+          upsert: true,
+          returnDocument: 'after',
+          setDefaultsOnInsert: true,
+        })
+        .exec();
+    } catch (err) {
+      if (!isDuplicateKeyError(err)) throw err;
+      this.logger.warn(
+        `Chat conversation upsert race for ${String(shopObjectId)}; retrying find`,
+      );
+      // Apply non-insert operators on the winner of the race.
+      const retryUpdate = { ...update };
+      delete retryUpdate['$setOnInsert'];
+      if (Object.keys(retryUpdate).length === 0) {
+        return this.conversationModel.findOne({ shopId: shopObjectId }).exec();
+      }
+      return this.conversationModel
+        .findOneAndUpdate({ shopId: shopObjectId }, retryUpdate, {
+          returnDocument: 'after',
+        })
+        .exec();
+    }
   }
 
   async getConversation(
@@ -211,7 +252,7 @@ export class ChatService {
 
   /** Mark the thread read for whichever side is viewing it. */
   async markRead(shopId: string, reader: string): Promise<void> {
-    const shopObjectId = new Types.ObjectId(shopId);
+    const shopObjectId = requireObjectId(shopId, 'chat participant id');
     const readerIsAdmin = isAdminPanelRole(reader);
 
     await this.messageModel
@@ -231,7 +272,7 @@ export class ChatService {
       .findOneAndUpdate(
         { shopId: shopObjectId },
         readerIsAdmin ? { unreadForAdmin: 0 } : { unreadForShop: 0 },
-        { new: true },
+        { returnDocument: 'after' },
       )
       .exec();
 
