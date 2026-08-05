@@ -5,7 +5,6 @@ export enum PaymentMethod {
 
 export enum OrderStatus {
   RECEIVED = 'RECEIVED',
-  PREPARING = 'PREPARING',
   SHIPPED = 'SHIPPED',
   DELIVERED = 'DELIVERED',
 }

@@ -59,6 +59,10 @@ export class DeliveryGuy {
   @Prop({ required: true, min: 0, default: 2 })
   perItemFee!: number;
 
+  /** Used when feeModel = HOURLY (EGP per hour worked). */
+  @Prop({ required: true, min: 0, default: 0 })
+  hourlyRate!: number;
+
   /** Running totals (updated when orders are assigned / delivered). */
   @Prop({ required: true, min: 0, default: 0 })
   totalDeliveries!: number;

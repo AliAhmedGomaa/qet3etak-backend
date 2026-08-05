@@ -299,8 +299,8 @@ export const SwaggerExamples = {
     },
   },
   updateOrderStatusRequest: {
-    summary: 'Move to preparing',
-    value: { status: 'PREPARING', note: 'Picking items' },
+    summary: 'Move to shipped',
+    value: { status: 'SHIPPED', note: 'Out for delivery' },
   },
 
   // ── Wallets ─────────────────────────────────────────────────────────────

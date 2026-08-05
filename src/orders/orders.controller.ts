@@ -6,11 +6,15 @@ import {
   Patch,
   Post,
   Query,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import {
   ApiBearerAuth,
   ApiBody,
+  ApiConsumes,
   ApiOkResponse,
   ApiOperation,
   ApiTags,
@@ -26,6 +30,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import type { AuthUser } from '../auth/guards/roles.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { effectiveBranchScope } from '../common/branch-scope';
+import { imageUploadOptions } from '../common/multer-image';
 import {
   AssignOrderDeliveryDto,
   CheckoutDto,
@@ -183,9 +188,9 @@ export class OrdersController {
     return this.ordersService.getForDeliveryGuy(user.userId, id);
   }
 
-  @Patch('delivery/orders/:id/deliver')
+  @Patch('delivery/orders/:id/ship')
   @ApiTags('Delivery — Orders')
-  @ApiOperation({ summary: 'Mark an assigned order as delivered' })
+  @ApiOperation({ summary: 'Mark an assigned order as SHIPPED' })
   @ApiBody({
     schema: {
       type: 'object',
@@ -194,15 +199,53 @@ export class OrdersController {
     required: false,
   })
   @DeliveryOnly()
+  markShipped(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() body?: { note?: string },
+  ) {
+    return this.ordersService.markShippedByCourier(
+      user.userId,
+      id,
+      body?.note,
+    );
+  }
+
+  @Patch('delivery/orders/:id/deliver')
+  @ApiTags('Delivery — Orders')
+  @ApiOperation({
+    summary: 'Mark an assigned order as delivered (requires proof photo)',
+  })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: ['photo'],
+      properties: {
+        note: { type: 'string' },
+        photo: {
+          type: 'string',
+          format: 'binary',
+          description: 'Proof-of-delivery photo (jpeg/png/webp, max 3MB)',
+        },
+      },
+    },
+  })
+  @UseInterceptors(
+    FileInterceptor('photo', imageUploadOptions('delivery-proof')),
+  )
+  @DeliveryOnly()
   markDelivered(
     @CurrentUser() user: AuthUser,
     @Param('id') id: string,
+    @UploadedFile() file: Express.Multer.File,
     @Body() body?: { note?: string },
   ) {
     return this.ordersService.markDeliveredByCourier(
       user.userId,
       id,
       body?.note,
+      file?.filename,
     );
   }
 

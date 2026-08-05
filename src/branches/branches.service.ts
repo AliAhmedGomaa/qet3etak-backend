@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -12,6 +13,7 @@ import {
   UserRole,
   UserStatus,
 } from '../common/enums/user.enums';
+import { distanceMeters, isWithinRadius } from '../common/geo';
 import {
   normalizePagination,
   paginatedResult,
@@ -26,6 +28,12 @@ import {
 } from './dto/branch.dto';
 import { Branch, BranchDocument } from './schemas/branch.schema';
 
+export type GeofenceMatch = {
+  branchId: string;
+  branchName: string;
+  distanceMeters: number;
+};
+
 @Injectable()
 export class BranchesService {
   constructor(
@@ -37,6 +45,7 @@ export class BranchesService {
   async create(dto: CreateBranchDto): Promise<Record<string, unknown>> {
     const code = this.normalizeCode(dto.code);
     await this.assertCodeUnique(code);
+    this.assertGeofenceFields(dto);
     const branch = await this.branchModel.create({
       name: dto.name.trim(),
       code,
@@ -45,6 +54,7 @@ export class BranchesService {
       phone: dto.phone?.trim() || '',
       notes: dto.notes?.trim() || '',
       status: dto.status ?? BranchStatus.ACTIVE,
+      ...this.geofencePayload(dto),
     });
     return this.toView(branch);
   }
@@ -123,8 +133,129 @@ export class BranchesService {
     if (dto.phone !== undefined) branch.phone = dto.phone.trim();
     if (dto.notes !== undefined) branch.notes = dto.notes.trim();
     if (dto.status !== undefined) branch.status = dto.status;
+    this.applyGeofenceUpdate(branch, dto);
     await branch.save();
     return this.toView(branch);
+  }
+
+  /**
+   * Assert the given GPS point is inside at least one active branch geofence.
+   * Throws ForbiddenException with an Arabic message when not allowed.
+   */
+  async assertInsideWorkplace(lat: number, lng: number): Promise<GeofenceMatch> {
+    const branches = await this.branchModel
+      .find({
+        status: BranchStatus.ACTIVE,
+        geofenceLat: { $type: 'number' },
+        geofenceLng: { $type: 'number' },
+        geofenceRadiusMeters: { $gt: 0 },
+      } as Record<string, unknown>)
+      .exec();
+
+    if (branches.length === 0) {
+      throw new ForbiddenException(
+        'لم يتم ضبط نطاق موقع العمل بعد. تواصل مع الإدارة.',
+      );
+    }
+
+    let best: GeofenceMatch | null = null;
+    for (const branch of branches) {
+      const center = {
+        lat: Number(branch.geofenceLat),
+        lng: Number(branch.geofenceLng),
+      };
+      const radius = Number(branch.geofenceRadiusMeters);
+      if (!isWithinRadius({ lat, lng }, center, radius)) {
+        continue;
+      }
+      const match: GeofenceMatch = {
+        branchId: String(branch._id),
+        branchName: branch.name,
+        distanceMeters: distanceMeters(lat, lng, center.lat, center.lng),
+      };
+      if (!best || match.distanceMeters < best.distanceMeters) {
+        best = match;
+      }
+    }
+
+    if (!best) {
+      throw new ForbiddenException(
+        'يجب أن تكون داخل نطاق موقع العمل لتسجيل الدخول',
+      );
+    }
+    return best;
+  }
+
+  private assertGeofenceFields(
+    dto: Pick<
+      CreateBranchDto,
+      'geofenceLat' | 'geofenceLng' | 'geofenceRadiusMeters'
+    >,
+  ): void {
+    const hasAny =
+      dto.geofenceLat !== undefined ||
+      dto.geofenceLng !== undefined ||
+      dto.geofenceRadiusMeters !== undefined;
+    if (!hasAny) return;
+    if (
+      dto.geofenceLat === undefined ||
+      dto.geofenceLng === undefined ||
+      dto.geofenceRadiusMeters === undefined
+    ) {
+      throw new BadRequestException(
+        'Geofence requires geofenceLat, geofenceLng, and geofenceRadiusMeters together',
+      );
+    }
+  }
+
+  private geofencePayload(
+    dto: Pick<
+      CreateBranchDto,
+      'geofenceLat' | 'geofenceLng' | 'geofenceRadiusMeters'
+    >,
+  ): Partial<Branch> {
+    if (
+      dto.geofenceLat === undefined ||
+      dto.geofenceLng === undefined ||
+      dto.geofenceRadiusMeters === undefined
+    ) {
+      return {};
+    }
+    return {
+      geofenceLat: dto.geofenceLat,
+      geofenceLng: dto.geofenceLng,
+      geofenceRadiusMeters: dto.geofenceRadiusMeters,
+    };
+  }
+
+  private applyGeofenceUpdate(branch: BranchDocument, dto: UpdateBranchDto): void {
+    const touching =
+      dto.geofenceLat !== undefined ||
+      dto.geofenceLng !== undefined ||
+      dto.geofenceRadiusMeters !== undefined;
+    if (!touching) return;
+
+    const nextLat =
+      dto.geofenceLat !== undefined ? dto.geofenceLat : branch.geofenceLat;
+    const nextLng =
+      dto.geofenceLng !== undefined ? dto.geofenceLng : branch.geofenceLng;
+    const nextRadius =
+      dto.geofenceRadiusMeters !== undefined
+        ? dto.geofenceRadiusMeters
+        : branch.geofenceRadiusMeters;
+
+    if (
+      nextLat === undefined ||
+      nextLng === undefined ||
+      nextRadius === undefined
+    ) {
+      throw new BadRequestException(
+        'Geofence requires geofenceLat, geofenceLng, and geofenceRadiusMeters together',
+      );
+    }
+    branch.geofenceLat = nextLat;
+    branch.geofenceLng = nextLng;
+    branch.geofenceRadiusMeters = nextRadius;
   }
 
   async assignManager(

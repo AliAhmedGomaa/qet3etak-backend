@@ -3,6 +3,7 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
+  OnModuleInit,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
@@ -13,12 +14,14 @@ import {
   type PaginatedResult,
 } from '../common/pagination';
 import { withBranchFilter } from '../common/branch-scope';
+import { absoluteMediaUrl } from '../common/media-url';
 import { ProductsService } from '../products/products.service';
 import { resolveUnitPrice } from '../products/pricing.util';
 import { UsersService } from '../users/users.service';
 import { WalletsService } from '../wallets/wallets.service';
 import { PushService } from '../push/push.service';
 import { DeliveryGuysService } from '../delivery/delivery-guys.service';
+import { DeliveryShiftsService } from '../delivery/delivery-shifts.service';
 import {
   DeliveryFeeModel,
   DeliveryGuyStatus,
@@ -59,7 +62,6 @@ export interface ReorderResult {
 
 const STATUS_FLOW: OrderStatus[] = [
   OrderStatus.RECEIVED,
-  OrderStatus.PREPARING,
   OrderStatus.SHIPPED,
   OrderStatus.DELIVERED,
 ];
@@ -96,7 +98,12 @@ function monthBounds(month: string): { start: Date; end: Date } {
 function feeModelSummary(
   guy: Pick<
     DeliveryGuy,
-    'feeModel' | 'flatFee' | 'percentRate' | 'baseFee' | 'perItemFee'
+    | 'feeModel'
+    | 'flatFee'
+    | 'percentRate'
+    | 'baseFee'
+    | 'perItemFee'
+    | 'hourlyRate'
   >,
 ): string {
   switch (guy.feeModel) {
@@ -104,6 +111,8 @@ function feeModelSummary(
       return `${guy.percentRate}% من قيمة الطلب`;
     case DeliveryFeeModel.BASE_PLUS_ITEMS:
       return `${guy.baseFee} ج.م + ${guy.perItemFee} ج.م لكل قطعة`;
+    case DeliveryFeeModel.HOURLY:
+      return `${guy.hourlyRate} ج.م لكل ساعة عمل`;
     case DeliveryFeeModel.FLAT:
     default:
       return `${guy.flatFee} ج.م لكل توصيلة`;
@@ -111,7 +120,7 @@ function feeModelSummary(
 }
 
 @Injectable()
-export class OrdersService {
+export class OrdersService implements OnModuleInit {
   constructor(
     @InjectModel(Order.name) private readonly orderModel: Model<Order>,
     private readonly productsService: ProductsService,
@@ -119,8 +128,19 @@ export class OrdersService {
     private readonly usersService: UsersService,
     private readonly pushService: PushService,
     private readonly deliveryGuysService: DeliveryGuysService,
+    private readonly deliveryShiftsService: DeliveryShiftsService,
     private readonly invoicesService: InvoicesService,
   ) {}
+
+  async onModuleInit(): Promise<void> {
+    // PREPARING removed — fold legacy rows into RECEIVED.
+    await this.orderModel
+      .updateMany(
+        { status: 'PREPARING' } as Record<string, unknown>,
+        { $set: { status: OrderStatus.RECEIVED } },
+      )
+      .exec();
+  }
 
   async checkout(shopUserId: string, dto: CheckoutDto): Promise<OrderDocument> {
     const shop = await this.usersService.findByIdOrFail(shopUserId);
@@ -401,8 +421,7 @@ export class OrdersService {
     if (nextIdx < 0) {
       throw new BadRequestException('Invalid status');
     }
-    // Allow move to any status in the board (including backwards for ops flexibility)
-    // but block skipping delivered from received without preparing/shipped? User asked drag-drop through board — allow any of the 4.
+    // Allow move to any status in the board (including backwards for ops flexibility).
     const statusChanged = currentIdx !== nextIdx;
     if (statusChanged) {
       order.status = dto.status;
@@ -411,6 +430,9 @@ export class OrdersService {
         at: new Date(),
         note: dto.note?.trim() || `Status → ${dto.status}`,
       });
+      if (dto.status === OrderStatus.DELIVERED && !order.deliveredAt) {
+        order.deliveredAt = new Date();
+      }
     }
 
     if (dto.deliveryGuyId) {
@@ -424,7 +446,6 @@ export class OrdersService {
     if (statusChanged) {
       const statusLabel: Record<OrderStatus, string> = {
         [OrderStatus.RECEIVED]: 'تم استلام الطلب',
-        [OrderStatus.PREPARING]: 'جاري التجهيز',
         [OrderStatus.SHIPPED]: 'تم الشحن',
         [OrderStatus.DELIVERED]: 'تم التسليم',
       };
@@ -448,8 +469,7 @@ export class OrdersService {
     if (
       statusChanged &&
       dto.status === OrderStatus.DELIVERED &&
-      order.deliveryGuyId &&
-      order.deliveryFee > 0
+      order.deliveryGuyId
     ) {
       await this.deliveryGuysService.recordDeliveryStats(
         String(order.deliveryGuyId),
@@ -475,7 +495,7 @@ export class OrdersService {
     };
     if (tab === 'active') {
       filter['status'] = {
-        $in: [OrderStatus.RECEIVED, OrderStatus.PREPARING, OrderStatus.SHIPPED],
+        $in: [OrderStatus.RECEIVED, OrderStatus.SHIPPED],
       };
     } else if (tab === 'delivered') {
       filter['status'] = OrderStatus.DELIVERED;
@@ -504,7 +524,7 @@ export class OrdersService {
     return order;
   }
 
-  async markDeliveredByCourier(
+  async markShippedByCourier(
     deliveryGuyId: string,
     orderId: string,
     note?: string,
@@ -513,6 +533,33 @@ export class OrdersService {
     if (order.status === OrderStatus.DELIVERED) {
       throw new BadRequestException('Order already delivered');
     }
+    if (order.status === OrderStatus.SHIPPED) {
+      return order;
+    }
+    return this.updateStatus(orderId, {
+      status: OrderStatus.SHIPPED,
+      note: note?.trim() || 'تم الشحن بواسطة المندوب',
+    });
+  }
+
+  async markDeliveredByCourier(
+    deliveryGuyId: string,
+    orderId: string,
+    note?: string,
+    photoFilename?: string,
+  ): Promise<OrderDocument> {
+    if (!photoFilename?.trim()) {
+      throw new BadRequestException(
+        'صورة إثبات التسليم مطلوبة',
+      );
+    }
+    const order = await this.getForDeliveryGuy(deliveryGuyId, orderId);
+    if (order.status === OrderStatus.DELIVERED) {
+      throw new BadRequestException('Order already delivered');
+    }
+    order.deliveryPhotoUrl = `/uploads/${photoFilename.trim()}`;
+    order.deliveredAt = new Date();
+    await order.save();
     return this.updateStatus(orderId, {
       status: OrderStatus.DELIVERED,
       note: note?.trim() || 'تم التسليم بواسطة المندوب',
@@ -562,11 +609,7 @@ export class OrdersService {
             $match: {
               deliveryGuyId: guyOid,
               status: {
-                $in: [
-                  OrderStatus.RECEIVED,
-                  OrderStatus.PREPARING,
-                  OrderStatus.SHIPPED,
-                ],
+                $in: [OrderStatus.RECEIVED, OrderStatus.SHIPPED],
               },
             },
           },
@@ -592,12 +635,27 @@ export class OrdersService {
         })
         .sort({ updatedAt: -1 })
         .limit(50)
-        .select('orderNumber shopName total deliveryFee updatedAt status')
+        .select(
+          'orderNumber shopName total deliveryFee deliveryPhotoUrl deliveredAt updatedAt status',
+        )
         .exec(),
     ]);
 
     const monthStats = monthAgg[0] ?? {};
     const pending = pendingAgg[0] ?? {};
+
+    const isHourly = guy.feeModel === DeliveryFeeModel.HOURLY;
+    const shiftStats = isHourly
+      ? await this.deliveryShiftsService.hoursForMonth(
+          deliveryGuyId,
+          start,
+          end,
+        )
+      : { hoursWorked: 0, earnedAmount: 0, shifts: 0 };
+
+    const monthFeesEarned = isHourly
+      ? shiftStats.earnedAmount
+      : Number((monthStats.feesEarned ?? 0).toFixed(2));
 
     return {
       id: String(guy._id),
@@ -610,15 +668,20 @@ export class OrdersService {
       percentRate: guy.percentRate,
       baseFee: guy.baseFee,
       perItemFee: guy.perItemFee,
+      hourlyRate: guy.hourlyRate,
       feeSummary: feeModelSummary(guy),
       month,
       lifetimeDeliveries: guy.totalDeliveries,
       lifetimeFeesEarned: guy.totalFeesEarned,
       monthDeliveries: monthStats.deliveries ?? 0,
-      monthFeesEarned: Number((monthStats.feesEarned ?? 0).toFixed(2)),
+      monthFeesEarned,
       monthOrderTotal: Number((monthStats.orderTotal ?? 0).toFixed(2)),
+      monthHoursWorked: shiftStats.hoursWorked,
+      monthShifts: shiftStats.shifts,
       activeOrders: pending.activeOrders ?? 0,
-      pendingFees: Number((pending.pendingFees ?? 0).toFixed(2)),
+      pendingFees: isHourly
+        ? 0
+        : Number((pending.pendingFees ?? 0).toFixed(2)),
       recentDeliveries: monthOrders.map((o) => {
         const json = o.toJSON() as unknown as Record<string, unknown>;
         return {
@@ -627,7 +690,12 @@ export class OrdersService {
           shopName: json.shopName,
           total: json.total,
           deliveryFee: json.deliveryFee,
-          deliveredAt: json.updatedAt,
+          deliveryPhotoUrl: absoluteMediaUrl(
+            typeof json.deliveryPhotoUrl === 'string'
+              ? json.deliveryPhotoUrl
+              : '',
+          ),
+          deliveredAt: json.deliveredAt ?? json.updatedAt,
         };
       }),
     };

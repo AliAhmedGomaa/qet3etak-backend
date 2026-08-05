@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   NotFoundException,
@@ -52,6 +53,7 @@ export class DeliveryGuysService {
       percentRate: dto.percentRate ?? 0,
       baseFee: dto.baseFee ?? 20,
       perItemFee: dto.perItemFee ?? 2,
+      hourlyRate: dto.hourlyRate ?? 0,
       totalDeliveries: 0,
       totalFeesEarned: 0,
     });
@@ -116,8 +118,17 @@ export class DeliveryGuysService {
     if (dto.percentRate !== undefined) guy.percentRate = dto.percentRate;
     if (dto.baseFee !== undefined) guy.baseFee = dto.baseFee;
     if (dto.perItemFee !== undefined) guy.perItemFee = dto.perItemFee;
+    if (dto.hourlyRate !== undefined) guy.hourlyRate = dto.hourlyRate;
     if (dto.password?.trim()) {
       guy.passwordHash = await bcrypt.hash(dto.password.trim(), 10);
+    }
+    if (
+      guy.feeModel === DeliveryFeeModel.HOURLY &&
+      (guy.hourlyRate ?? 0) <= 0
+    ) {
+      throw new BadRequestException(
+        'hourlyRate must be > 0 when feeModel is HOURLY',
+      );
     }
     await guy.save();
     return guy;
@@ -130,11 +141,19 @@ export class DeliveryGuysService {
     }
   }
 
-  /** Pure fee calculation from a courier's fee settings. */
+  /**
+   * Pure fee calculation from a courier's fee settings.
+   * HOURLY returns 0 — pay is tracked via clock-in shifts, not per order.
+   */
   calculateFee(
     guy: Pick<
       DeliveryGuy,
-      'feeModel' | 'flatFee' | 'percentRate' | 'baseFee' | 'perItemFee'
+      | 'feeModel'
+      | 'flatFee'
+      | 'percentRate'
+      | 'baseFee'
+      | 'perItemFee'
+      | 'hourlyRate'
     >,
     input: CalculateDeliveryFeeDto,
   ): number {
@@ -148,6 +167,9 @@ export class DeliveryGuysService {
         break;
       case DeliveryFeeModel.BASE_PLUS_ITEMS:
         fee = (guy.baseFee || 0) + itemCount * (guy.perItemFee || 0);
+        break;
+      case DeliveryFeeModel.HOURLY:
+        fee = 0;
         break;
       case DeliveryFeeModel.FLAT:
       default:
@@ -175,8 +197,22 @@ export class DeliveryGuysService {
   ): Promise<DeliveryGuyDocument> {
     const guy = await this.findById(id);
     guy.totalDeliveries += 1;
+    if (guy.feeModel !== DeliveryFeeModel.HOURLY) {
+      guy.totalFeesEarned = Number(
+        (guy.totalFeesEarned + Math.max(0, fee)).toFixed(2),
+      );
+    }
+    await guy.save();
+    return guy;
+  }
+
+  async addHourlyEarnings(
+    id: string,
+    amount: number,
+  ): Promise<DeliveryGuyDocument> {
+    const guy = await this.findById(id);
     guy.totalFeesEarned = Number(
-      (guy.totalFeesEarned + Math.max(0, fee)).toFixed(2),
+      (guy.totalFeesEarned + Math.max(0, amount)).toFixed(2),
     );
     await guy.save();
     return guy;

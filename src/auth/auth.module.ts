@@ -3,6 +3,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { JwtModule } from '@nestjs/jwt';
 import { MongooseModule } from '@nestjs/mongoose';
 import { PassportModule } from '@nestjs/passport';
+import { BranchesModule } from '../branches/branches.module';
 import {
   DeliveryGuy,
   DeliveryGuySchema,
@@ -19,6 +20,7 @@ import { JwtStrategy } from './strategies/jwt.strategy';
   imports: [
     UsersModule,
     RolesModule,
+    BranchesModule,
     MongooseModule.forFeature([
       { name: Employee.name, schema: EmployeeSchema },
       { name: DeliveryGuy.name, schema: DeliveryGuySchema },

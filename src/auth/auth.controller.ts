@@ -17,7 +17,7 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { CurrentUser } from './decorators/current-user.decorator';
-import { LoginDto } from './dto/login.dto';
+import { LoginDto, DeliveryLoginDto } from './dto/login.dto';
 import { RegisterShopDto } from './dto/register-shop.dto';
 import type { AuthUser } from './guards/roles.guard';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
@@ -100,9 +100,11 @@ export class AuthController {
   }
 
   @Post('delivery/login')
-  @ApiOperation({ summary: 'Delivery portal login' })
-  @ApiBody({ type: LoginDto })
-  loginDelivery(@Body() dto: LoginDto) {
+  @ApiOperation({
+    summary: 'Delivery portal login (must be inside workplace geofence)',
+  })
+  @ApiBody({ type: DeliveryLoginDto })
+  loginDelivery(@Body() dto: DeliveryLoginDto) {
     return this.authService.loginDelivery(dto);
   }
 

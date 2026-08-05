@@ -90,6 +90,17 @@ export class CreateDeliveryGuyDto {
   @IsNumber()
   @Min(0)
   perItemFee?: number;
+
+  @ApiPropertyOptional({
+    example: 25,
+    minimum: 0,
+    description: 'EGP per hour when feeModel = HOURLY',
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  hourlyRate?: number;
 }
 
 export class UpdateDeliveryGuyDto extends PartialType(CreateDeliveryGuyDto) {

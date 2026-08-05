@@ -91,6 +91,14 @@ export class Order {
   /** Courier fee for this order (EGP), calculated from the guy’s fee model. */
   @Prop({ min: 0, default: 0 })
   deliveryFee!: number;
+
+  /** Proof-of-delivery photo path (e.g. /uploads/delivery-proof-….jpg). */
+  @Prop({ trim: true, default: '' })
+  deliveryPhotoUrl!: string;
+
+  /** When the courier marked the order as delivered. */
+  @Prop({ type: Date })
+  deliveredAt?: Date;
 }
 
 export const OrderSchema = SchemaFactory.createForClass(Order);

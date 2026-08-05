@@ -60,7 +60,7 @@ export class ReorderDto {
 }
 
 export class UpdateOrderStatusDto {
-  @ApiProperty({ enum: OrderStatus, example: OrderStatus.PREPARING })
+  @ApiProperty({ enum: OrderStatus, example: OrderStatus.SHIPPED })
   @IsEnum(OrderStatus)
   status!: OrderStatus;
 

@@ -34,6 +34,18 @@ export class Branch {
     index: true,
   })
   status!: BranchStatus;
+
+  /** Workplace geofence center latitude (WGS84). Required for delivery login. */
+  @Prop({ type: Number, min: -90, max: 90 })
+  geofenceLat?: number;
+
+  /** Workplace geofence center longitude (WGS84). */
+  @Prop({ type: Number, min: -180, max: 180 })
+  geofenceLng?: number;
+
+  /** Allowed radius around the workplace in meters (e.g. 150). */
+  @Prop({ type: Number, min: 10, max: 50000 })
+  geofenceRadiusMeters?: number;
 }
 
 export const BranchSchema = SchemaFactory.createForClass(Branch);

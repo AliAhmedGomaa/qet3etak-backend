@@ -2,10 +2,14 @@ import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger';
 import {
   IsEnum,
   IsMongoId,
+  IsNumber,
   IsOptional,
   IsString,
+  Max,
+  Min,
   MinLength,
 } from 'class-validator';
+import { Type } from 'class-transformer';
 import { BranchStatus } from '../../common/enums/branch.enums';
 
 export class CreateBranchDto {
@@ -43,6 +47,39 @@ export class CreateBranchDto {
   @IsOptional()
   @IsEnum(BranchStatus)
   status?: BranchStatus;
+
+  @ApiPropertyOptional({
+    example: 30.0444,
+    description: 'Workplace geofence latitude (WGS84)',
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(-90)
+  @Max(90)
+  geofenceLat?: number;
+
+  @ApiPropertyOptional({
+    example: 31.2357,
+    description: 'Workplace geofence longitude (WGS84)',
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(-180)
+  @Max(180)
+  geofenceLng?: number;
+
+  @ApiPropertyOptional({
+    example: 150,
+    description: 'Geofence radius in meters (min 10)',
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(10)
+  @Max(50000)
+  geofenceRadiusMeters?: number;
 }
 
 export class UpdateBranchDto extends PartialType(CreateBranchDto) {}

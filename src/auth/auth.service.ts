@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
@@ -16,12 +17,13 @@ import {
 import { EMPLOYEE_ROLE } from '../common/enums/hr.enums';
 import { DELIVERY_ROLE } from '../common/enums/delivery.enums';
 import { absoluteMediaUrl } from '../common/media-url';
+import { BranchesService } from '../branches/branches.service';
 import { DeliveryGuy } from '../delivery/schemas/delivery-guy.schema';
 import { Employee } from '../hr/schemas/employee.schema';
 import { RolesService } from '../roles/roles.service';
 import { UserDocument } from '../users/schemas/user.schema';
 import { UsersService } from '../users/users.service';
-import { LoginDto } from './dto/login.dto';
+import { DeliveryLoginDto, LoginDto } from './dto/login.dto';
 import { RegisterShopDto } from './dto/register-shop.dto';
 
 @Injectable()
@@ -30,6 +32,7 @@ export class AuthService {
     private readonly usersService: UsersService,
     private readonly rolesService: RolesService,
     private readonly jwtService: JwtService,
+    private readonly branchesService: BranchesService,
     @InjectModel(Employee.name)
     private readonly employeeModel: Model<Employee>,
     @InjectModel(DeliveryGuy.name)
@@ -127,7 +130,7 @@ export class AuthService {
   }
 
   async loginDelivery(
-    dto: LoginDto,
+    dto: DeliveryLoginDto,
   ): Promise<{ accessToken: string; user: Record<string, unknown> }> {
     const guy = await this.deliveryGuyModel
       .findOne({ phone: dto.phone.trim() })
@@ -140,6 +143,13 @@ export class AuthService {
     if (!ok) {
       throw new UnauthorizedException('Invalid phone or password');
     }
+
+    // Geofence: courier may only log in inside an admin workplace.
+    const workplace = await this.branchesService.assertInsideWorkplace(
+      Number(dto.lat),
+      Number(dto.lng),
+    );
+
     const payload = {
       sub: String(guy._id),
       phone: guy.phone,
@@ -153,6 +163,8 @@ export class AuthService {
         ...json,
         role: DELIVERY_ROLE,
         kind: 'delivery',
+        workplaceBranchId: workplace.branchId,
+        workplaceBranchName: workplace.branchName,
       },
     };
   }
