@@ -13,7 +13,14 @@ import {
   UserRole,
   UserStatus,
 } from '../common/enums/user.enums';
-import { distanceMeters, isWithinRadius } from '../common/geo';
+import {
+  distanceMeters,
+  isPointInPolygon,
+  isWithinRadius,
+  normalizePolygon,
+  polygonCentroid,
+  type GeoPoint,
+} from '../common/geo';
 import {
   normalizePagination,
   paginatedResult,
@@ -140,34 +147,55 @@ export class BranchesService {
 
   /**
    * Assert the given GPS point is inside at least one active branch geofence.
-   * Throws ForbiddenException with an Arabic message when not allowed.
+   * Prefers drawn polygons; falls back to legacy circle (lat/lng/radius).
    */
   async assertInsideWorkplace(lat: number, lng: number): Promise<GeofenceMatch> {
     const branches = await this.branchModel
-      .find({
-        status: BranchStatus.ACTIVE,
-        geofenceLat: { $type: 'number' },
-        geofenceLng: { $type: 'number' },
-        geofenceRadiusMeters: { $gt: 0 },
-      } as Record<string, unknown>)
+      .find({ status: BranchStatus.ACTIVE })
       .exec();
 
-    if (branches.length === 0) {
+    const candidates = branches.filter((branch) => {
+      const poly = normalizePolygon(branch.geofencePolygon);
+      if (poly.length >= 3) return true;
+      return (
+        typeof branch.geofenceLat === 'number' &&
+        typeof branch.geofenceLng === 'number' &&
+        typeof branch.geofenceRadiusMeters === 'number' &&
+        branch.geofenceRadiusMeters > 0
+      );
+    });
+
+    if (candidates.length === 0) {
       throw new ForbiddenException(
         'لم يتم ضبط نطاق موقع العمل بعد. تواصل مع الإدارة.',
       );
     }
 
+    const point: GeoPoint = { lat, lng };
     let best: GeofenceMatch | null = null;
-    for (const branch of branches) {
-      const center = {
-        lat: Number(branch.geofenceLat),
-        lng: Number(branch.geofenceLng),
-      };
-      const radius = Number(branch.geofenceRadiusMeters);
-      if (!isWithinRadius({ lat, lng }, center, radius)) {
-        continue;
+
+    for (const branch of candidates) {
+      const poly = normalizePolygon(branch.geofencePolygon);
+      let inside = false;
+      let center: GeoPoint | null = null;
+
+      if (poly.length >= 3) {
+        inside = isPointInPolygon(point, poly);
+        center = polygonCentroid(poly);
+      } else if (
+        typeof branch.geofenceLat === 'number' &&
+        typeof branch.geofenceLng === 'number' &&
+        typeof branch.geofenceRadiusMeters === 'number'
+      ) {
+        center = {
+          lat: Number(branch.geofenceLat),
+          lng: Number(branch.geofenceLng),
+        };
+        inside = isWithinRadius(point, center, Number(branch.geofenceRadiusMeters));
       }
+
+      if (!inside || !center) continue;
+
       const match: GeofenceMatch = {
         branchId: String(branch._id),
         branchName: branch.name,
@@ -186,34 +214,44 @@ export class BranchesService {
     return best;
   }
 
-  private assertGeofenceFields(
-    dto: Pick<
-      CreateBranchDto,
-      'geofenceLat' | 'geofenceLng' | 'geofenceRadiusMeters'
-    >,
-  ): void {
-    const hasAny =
+  private assertGeofenceFields(dto: CreateBranchDto | UpdateBranchDto): void {
+    if (dto.geofencePolygon !== undefined) {
+      const poly = normalizePolygon(dto.geofencePolygon);
+      if (poly.length > 0 && poly.length < 3) {
+        throw new BadRequestException(
+          'Geofence polygon requires at least 3 points',
+        );
+      }
+      return;
+    }
+    const hasCircle =
       dto.geofenceLat !== undefined ||
       dto.geofenceLng !== undefined ||
       dto.geofenceRadiusMeters !== undefined;
-    if (!hasAny) return;
+    if (!hasCircle) return;
     if (
       dto.geofenceLat === undefined ||
       dto.geofenceLng === undefined ||
       dto.geofenceRadiusMeters === undefined
     ) {
       throw new BadRequestException(
-        'Geofence requires geofenceLat, geofenceLng, and geofenceRadiusMeters together',
+        'Geofence requires geofencePolygon (preferred) or lat/lng/radius together',
       );
     }
   }
 
-  private geofencePayload(
-    dto: Pick<
-      CreateBranchDto,
-      'geofenceLat' | 'geofenceLng' | 'geofenceRadiusMeters'
-    >,
-  ): Partial<Branch> {
+  private geofencePayload(dto: CreateBranchDto): Partial<Branch> {
+    if (dto.geofencePolygon !== undefined) {
+      const poly = normalizePolygon(dto.geofencePolygon);
+      if (poly.length < 3) return {};
+      const center = polygonCentroid(poly)!;
+      return {
+        geofencePolygon: poly,
+        geofenceLat: center.lat,
+        geofenceLng: center.lng,
+        geofenceRadiusMeters: undefined,
+      };
+    }
     if (
       dto.geofenceLat === undefined ||
       dto.geofenceLng === undefined ||
@@ -228,7 +266,32 @@ export class BranchesService {
     };
   }
 
-  private applyGeofenceUpdate(branch: BranchDocument, dto: UpdateBranchDto): void {
+  private applyGeofenceUpdate(
+    branch: BranchDocument,
+    dto: UpdateBranchDto,
+  ): void {
+    if (dto.geofencePolygon !== undefined) {
+      const poly = normalizePolygon(dto.geofencePolygon);
+      if (poly.length === 0) {
+        branch.geofencePolygon = undefined;
+        branch.geofenceLat = undefined;
+        branch.geofenceLng = undefined;
+        branch.geofenceRadiusMeters = undefined;
+        return;
+      }
+      if (poly.length < 3) {
+        throw new BadRequestException(
+          'Geofence polygon requires at least 3 points',
+        );
+      }
+      const center = polygonCentroid(poly)!;
+      branch.geofencePolygon = poly;
+      branch.geofenceLat = center.lat;
+      branch.geofenceLng = center.lng;
+      branch.geofenceRadiusMeters = undefined;
+      return;
+    }
+
     const touching =
       dto.geofenceLat !== undefined ||
       dto.geofenceLng !== undefined ||
@@ -250,7 +313,7 @@ export class BranchesService {
       nextRadius === undefined
     ) {
       throw new BadRequestException(
-        'Geofence requires geofenceLat, geofenceLng, and geofenceRadiusMeters together',
+        'Geofence requires geofencePolygon (preferred) or lat/lng/radius together',
       );
     }
     branch.geofenceLat = nextLat;

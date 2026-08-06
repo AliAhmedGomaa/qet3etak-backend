@@ -35,17 +35,33 @@ export class Branch {
   })
   status!: BranchStatus;
 
-  /** Workplace geofence center latitude (WGS84). Required for delivery login. */
+  /** Workplace geofence center latitude (WGS84). Optional legacy / centroid. */
   @Prop({ type: Number, min: -90, max: 90 })
   geofenceLat?: number;
 
-  /** Workplace geofence center longitude (WGS84). */
+  /** Workplace geofence center longitude (WGS84). Optional legacy / centroid. */
   @Prop({ type: Number, min: -180, max: 180 })
   geofenceLng?: number;
 
-  /** Allowed radius around the workplace in meters (e.g. 150). */
+  /** Allowed radius around the workplace in meters (legacy circle geofence). */
   @Prop({ type: Number, min: 10, max: 50000 })
   geofenceRadiusMeters?: number;
+
+  /**
+   * Drawn workplace boundary as a polygon of WGS84 points (min 3).
+   * Preferred over the legacy circle when present.
+   */
+  @Prop({
+    type: [
+      {
+        lat: { type: Number, required: true },
+        lng: { type: Number, required: true },
+        _id: false,
+      },
+    ],
+    default: undefined,
+  })
+  geofencePolygon?: Array<{ lat: number; lng: number }>;
 }
 
 export const BranchSchema = SchemaFactory.createForClass(Branch);
