@@ -27,6 +27,8 @@ export type CreateUserInput = {
   phone: string;
   city: string;
   address: string;
+  locationLat?: number;
+  locationLng?: number;
   commercialRegPhotoUrl: string;
   passwordHash: string;
   role?: User['role'];
@@ -43,6 +45,8 @@ export type UpdateShopInput = {
   phone?: string;
   city?: string;
   address?: string;
+  locationLat?: number | null;
+  locationLng?: number | null;
   commercialRegPhotoUrl?: string;
   passwordHash?: string;
   status?: UserStatus;
@@ -206,6 +210,14 @@ export class UsersService {
     if (data.shopName !== undefined) user.shopName = data.shopName.trim();
     if (data.city !== undefined) user.city = data.city.trim();
     if (data.address !== undefined) user.address = data.address.trim();
+    if (data.locationLat !== undefined) {
+      user.locationLat =
+        data.locationLat === null ? undefined : Number(data.locationLat);
+    }
+    if (data.locationLng !== undefined) {
+      user.locationLng =
+        data.locationLng === null ? undefined : Number(data.locationLng);
+    }
     if (data.commercialRegPhotoUrl !== undefined) {
       user.commercialRegPhotoUrl = data.commercialRegPhotoUrl.trim();
     }

@@ -58,6 +58,13 @@ export class User {
   @Prop({ required: true, trim: true })
   address!: string;
 
+  /** Shop pin on the map (WGS84) — used by couriers for navigation. */
+  @Prop({ type: Number })
+  locationLat?: number;
+
+  @Prop({ type: Number })
+  locationLng?: number;
+
   @Prop({ required: true })
   commercialRegPhotoUrl!: string;
 

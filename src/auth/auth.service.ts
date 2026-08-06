@@ -60,12 +60,17 @@ export class AuthService {
     }
 
     const passwordHash = await bcrypt.hash(dto.password, 10);
+    const lat = dto.locationLat != null ? Number(dto.locationLat) : undefined;
+    const lng = dto.locationLng != null ? Number(dto.locationLng) : undefined;
     const user = await this.usersService.create({
       fullName: dto.fullName.trim(),
       shopName: dto.shopName.trim(),
       phone: dto.phone.trim(),
       city: dto.city.trim(),
       address: dto.address.trim(),
+      ...(Number.isFinite(lat) && Number.isFinite(lng)
+        ? { locationLat: lat, locationLng: lng }
+        : {}),
       commercialRegPhotoUrl: photoUrl,
       passwordHash,
       role: UserRole.SHOP_OWNER,
@@ -73,6 +78,36 @@ export class AuthService {
     });
 
     return this.tokenResponse(user);
+  }
+
+  async updateShopProfile(
+    shopUserId: string,
+    dto: {
+      city?: string;
+      address?: string;
+      locationLat?: number;
+      locationLng?: number;
+    },
+  ): Promise<Record<string, unknown>> {
+    const lat = dto.locationLat != null ? Number(dto.locationLat) : undefined;
+    const lng = dto.locationLng != null ? Number(dto.locationLng) : undefined;
+    if (
+      (lat != null && !Number.isFinite(lat)) ||
+      (lng != null && !Number.isFinite(lng))
+    ) {
+      throw new BadRequestException('Invalid location coordinates');
+    }
+    if ((lat != null) !== (lng != null)) {
+      throw new BadRequestException('Both latitude and longitude are required');
+    }
+    const user = await this.usersService.updateShop(shopUserId, {
+      city: dto.city,
+      address: dto.address,
+      ...(lat != null && lng != null
+        ? { locationLat: lat, locationLng: lng }
+        : {}),
+    });
+    return this.toUserView(user);
   }
 
   async login(

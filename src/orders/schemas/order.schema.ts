@@ -65,6 +65,19 @@ export class Order {
   @Prop({ required: true })
   shopName!: string;
 
+  /** Snapshot of shop address at checkout for courier navigation. */
+  @Prop({ trim: true, default: '' })
+  shopCity!: string;
+
+  @Prop({ trim: true, default: '' })
+  shopAddress!: string;
+
+  @Prop({ type: Number })
+  shopLocationLat?: number;
+
+  @Prop({ type: Number })
+  shopLocationLng?: number;
+
   @Prop({ type: String, enum: OrderStatus, default: OrderStatus.RECEIVED, index: true })
   status!: OrderStatus;
 

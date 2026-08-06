@@ -41,6 +41,22 @@ export class CreateAdminShopDto {
   @MinLength(5)
   address!: string;
 
+  @ApiPropertyOptional({ example: 30.0444 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(-90)
+  @Max(90)
+  locationLat?: number;
+
+  @ApiPropertyOptional({ example: 31.2357 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(-180)
+  @Max(180)
+  locationLng?: number;
+
   @ApiProperty({ example: 'Shop123!', minLength: 6 })
   @IsString()
   @MinLength(6)

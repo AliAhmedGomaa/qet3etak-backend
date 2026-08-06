@@ -178,6 +178,10 @@ export class OrdersService implements OnModuleInit {
       orderNumber,
       shopId: new Types.ObjectId(shopUserId),
       shopName: shop.shopName,
+      shopCity: shop.city || '',
+      shopAddress: shop.address || '',
+      shopLocationLat: shop.locationLat,
+      shopLocationLng: shop.locationLng,
       branchId: shop.branchId,
       status: OrderStatus.RECEIVED,
       paymentMethod: dto.paymentMethod,
@@ -566,6 +570,28 @@ export class OrdersService implements OnModuleInit {
     if (!order) throw new NotFoundException('Order not found');
     if (String(order.deliveryGuyId ?? '') !== deliveryGuyId) {
       throw new ForbiddenException('Order is not assigned to you');
+    }
+    // Backfill live shop location for older orders that lack a snapshot.
+    if (
+      (order.shopLocationLat == null || order.shopLocationLng == null) &&
+      order.shopId
+    ) {
+      try {
+        const shop = await this.usersService.findByIdOrFail(String(order.shopId));
+        if (!order.shopCity && shop.city) order.shopCity = shop.city;
+        if (!order.shopAddress && shop.address) order.shopAddress = shop.address;
+        if (
+          shop.locationLat != null &&
+          shop.locationLng != null &&
+          Number.isFinite(shop.locationLat) &&
+          Number.isFinite(shop.locationLng)
+        ) {
+          order.shopLocationLat = shop.locationLat;
+          order.shopLocationLng = shop.locationLng;
+        }
+      } catch {
+        /* shop may be deleted */
+      }
     }
     return order;
   }

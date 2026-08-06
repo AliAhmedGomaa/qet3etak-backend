@@ -1,8 +1,9 @@
 import {
+  Body,
   Controller,
   Get,
+  Patch,
   Post,
-  Body,
   UploadedFile,
   UseGuards,
   UseInterceptors,
@@ -17,13 +18,17 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { CurrentUser } from './decorators/current-user.decorator';
+import { Roles } from './decorators/roles.decorator';
 import { LoginDto, DeliveryLoginDto } from './dto/login.dto';
 import { RegisterShopDto } from './dto/register-shop.dto';
+import { UpdateShopProfileDto } from './dto/update-shop-profile.dto';
 import type { AuthUser } from './guards/roles.guard';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
+import { RolesGuard } from './guards/roles.guard';
 import { AuthService } from './auth.service';
 import { examples } from '../swagger/examples';
 import { imageUploadOptions } from '../common/multer-image';
+import { UserRole } from '../common/enums/user.enums';
 
 @ApiTags('Auth')
 @Controller('auth')
@@ -54,6 +59,8 @@ export class AuthController {
         phone: { type: 'string', example: '01001234567' },
         city: { type: 'string', example: 'Cairo' },
         address: { type: 'string', example: '12 Tahrir St, Downtown' },
+        locationLat: { type: 'number', example: 30.0444 },
+        locationLng: { type: 'number', example: 31.2357 },
         password: { type: 'string', example: 'Shop123!' },
         commercialRegPhotoUrl: { type: 'string', nullable: true },
         commercialRegPhoto: {
@@ -124,5 +131,20 @@ export class AuthController {
       return this.authService.deliveryMe(user.userId);
     }
     return this.authService.me(user.userId);
+  }
+
+  @Patch('me/shop-profile')
+  @ApiBearerAuth('JWT')
+  @ApiOperation({
+    summary: 'Update shop address and map location (shop owner)',
+  })
+  @ApiBody({ type: UpdateShopProfileDto })
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.SHOP_OWNER)
+  updateShopProfile(
+    @CurrentUser() user: AuthUser,
+    @Body() dto: UpdateShopProfileDto,
+  ) {
+    return this.authService.updateShopProfile(user.userId, dto);
   }
 }

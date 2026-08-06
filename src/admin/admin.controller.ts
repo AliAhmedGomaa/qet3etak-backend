@@ -107,12 +107,17 @@ export class AdminController {
         : dto.branchId?.trim() || undefined;
 
     const passwordHash = await bcrypt.hash(dto.password, 10);
+    const lat = dto.locationLat != null ? Number(dto.locationLat) : undefined;
+    const lng = dto.locationLng != null ? Number(dto.locationLng) : undefined;
     const user = await this.usersService.create({
       fullName: dto.fullName.trim(),
       shopName: dto.shopName.trim(),
       phone,
       city: dto.city.trim(),
       address: dto.address.trim(),
+      ...(Number.isFinite(lat) && Number.isFinite(lng)
+        ? { locationLat: lat, locationLng: lng }
+        : {}),
       commercialRegPhotoUrl: dto.commercialRegPhotoUrl?.trim() || '',
       passwordHash,
       role: UserRole.SHOP_OWNER,
@@ -166,6 +171,8 @@ export class AdminController {
       phone: dto.phone,
       city: dto.city,
       address: dto.address,
+      locationLat: dto.locationLat,
+      locationLng: dto.locationLng,
       commercialRegPhotoUrl: dto.commercialRegPhotoUrl,
       passwordHash,
       status: dto.status,
