@@ -57,9 +57,20 @@ export class RolesService implements OnModuleInit {
         continue;
       }
       // Keep admin-customized permissions; only upgrade legacy minimal sets.
-      const nextPerms = isLegacyPermissionSet(existing.permissions)
+      let nextPerms = isLegacyPermissionSet(existing.permissions)
         ? seed.permissions
         : existing.permissions;
+      // ADMIN always mirrors the full catalog.
+      if (seed.code === UserRole.ADMIN) {
+        nextPerms = seed.permissions;
+      } else if (
+        seed.permissions.includes('orders.create') &&
+        nextPerms.includes('orders.update') &&
+        !nextPerms.includes('orders.create')
+      ) {
+        // Soft-add new counter-sale permission for ops roles that already sell/update orders.
+        nextPerms = [...nextPerms, 'orders.create'];
+      }
       existing.name = seed.name;
       existing.description = seed.description;
       existing.adminPanel = seed.adminPanel;
