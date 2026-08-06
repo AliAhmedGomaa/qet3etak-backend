@@ -41,7 +41,6 @@ export const PERMISSION_CATALOG: PermissionDef[] = [
   { key: 'categories.manage', labelAr: 'إدارة التصنيفات', group: 'catalog', groupLabelAr: 'الكتالوج' },
   { key: 'qualities.manage', labelAr: 'إدارة الجودات', group: 'catalog', groupLabelAr: 'الكتالوج' },
   { key: 'inventory.manage', labelAr: 'إدارة المخزون', group: 'catalog', groupLabelAr: 'الكتالوج' },
-  { key: 'import.manage', labelAr: 'استيراد البيانات', group: 'catalog', groupLabelAr: 'الكتالوج' },
 
   { key: 'orders.read', labelAr: 'عرض الطلبات', group: 'orders', groupLabelAr: 'الطلبات' },
   { key: 'orders.update', labelAr: 'تحديث الطلبات / التوصيل', group: 'orders', groupLabelAr: 'الطلبات' },
@@ -92,7 +91,6 @@ export const OPS_PERMISSIONS: string[] = [
   'categories.manage',
   'qualities.manage',
   'inventory.manage',
-  'import.manage',
   'orders.read',
   'orders.update',
   'invoices.read',

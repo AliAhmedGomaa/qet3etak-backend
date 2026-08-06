@@ -24,7 +24,6 @@ import { FinancialsModule } from './financials/financials.module';
 import { ChatModule } from './chat/chat.module';
 import { DeliveryModule } from './delivery/delivery.module';
 import { InvoicesModule } from './invoices/invoices.module';
-import { ImportModule } from './import/import.module';
 import { ReturnsModule } from './returns/returns.module';
 import { ReportsModule } from './reports/reports.module';
 import { BranchesModule } from './branches/branches.module';
@@ -69,7 +68,6 @@ import { ShopProductsModule } from './shop-products/shop-products.module';
     ChatModule,
     DeliveryModule,
     InvoicesModule,
-    ImportModule,
     ReturnsModule,
     ReportsModule,
     RepairModule,
