@@ -40,11 +40,10 @@ export class DeliveryGuysService {
       throw new ConflictException('A delivery guy with this phone already exists');
     }
     const passwordHash = await bcrypt.hash(dto.password, 10);
-    const feeModel = dto.feeModel ?? DeliveryFeeModel.FLAT;
     const hourlyRate = dto.hourlyRate ?? 0;
-    if (feeModel === DeliveryFeeModel.HOURLY && hourlyRate <= 0) {
+    if (hourlyRate <= 0) {
       throw new BadRequestException(
-        'يجب تحديد سعر الساعة (أكبر من صفر) عند اختيار الأجر بالساعة',
+        'يجب تحديد سعر الساعة (أكبر من صفر)',
       );
     }
     return this.guyModel.create({
@@ -55,7 +54,7 @@ export class DeliveryGuysService {
       vehicleType: dto.vehicleType?.trim() || '',
       notes: dto.notes?.trim() || '',
       status: dto.status ?? DeliveryGuyStatus.ACTIVE,
-      feeModel,
+      feeModel: DeliveryFeeModel.HOURLY,
       flatFee: dto.flatFee ?? 30,
       percentRate: dto.percentRate ?? 0,
       baseFee: dto.baseFee ?? 20,
@@ -120,7 +119,10 @@ export class DeliveryGuysService {
     if (dto.vehicleType !== undefined) guy.vehicleType = dto.vehicleType.trim();
     if (dto.notes !== undefined) guy.notes = dto.notes.trim();
     if (dto.status !== undefined) guy.status = dto.status;
-    if (dto.feeModel !== undefined) guy.feeModel = dto.feeModel;
+    if (dto.feeModel !== undefined || dto.hourlyRate !== undefined) {
+      // Delivery pay is hourly-only.
+      guy.feeModel = DeliveryFeeModel.HOURLY;
+    }
     if (dto.flatFee !== undefined) guy.flatFee = dto.flatFee;
     if (dto.percentRate !== undefined) guy.percentRate = dto.percentRate;
     if (dto.baseFee !== undefined) guy.baseFee = dto.baseFee;
@@ -134,7 +136,7 @@ export class DeliveryGuysService {
       (guy.hourlyRate ?? 0) <= 0
     ) {
       throw new BadRequestException(
-        'يجب تحديد سعر الساعة (أكبر من صفر) عند اختيار الأجر بالساعة',
+        'يجب تحديد سعر الساعة (أكبر من صفر)',
       );
     }
     await guy.save();

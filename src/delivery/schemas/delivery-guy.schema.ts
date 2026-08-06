@@ -39,7 +39,7 @@ export class DeliveryGuy {
   @Prop({
     type: String,
     enum: DeliveryFeeModel,
-    default: DeliveryFeeModel.FLAT,
+    default: DeliveryFeeModel.HOURLY,
   })
   feeModel!: DeliveryFeeModel;
 

@@ -43,10 +43,14 @@ export class DeliveryShiftsService {
     dto: DeliveryLocationDto,
   ): Promise<DeliveryShiftDocument> {
     const guy = await this.deliveryGuysService.findById(deliveryGuyId);
-    if (guy.feeModel === DeliveryFeeModel.HOURLY && (guy.hourlyRate ?? 0) <= 0) {
+    if ((guy.hourlyRate ?? 0) <= 0) {
       throw new BadRequestException(
-        'Hourly rate is not configured for this courier',
+        'سعر الساعة غير مضبوط لهذا المندوب — راجع الإدارة',
       );
+    }
+    if (guy.feeModel !== DeliveryFeeModel.HOURLY) {
+      guy.feeModel = DeliveryFeeModel.HOURLY;
+      await guy.save();
     }
 
     const existing = await this.getActiveShift(deliveryGuyId);
