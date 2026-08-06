@@ -36,6 +36,7 @@ import {
   CheckoutDto,
   ReorderDto,
   UpdateOrderStatusDto,
+  WalkInSaleDto,
 } from './dto/order.dto';
 import { OrdersService } from './orders.service';
 import { examples } from '../swagger/examples';
@@ -128,6 +129,32 @@ export class OrdersController {
       query.q,
       scope,
     );
+  }
+
+  @Get('admin/sales/today')
+  @ApiTags('Admin — Sales')
+  @ApiOperation({ summary: 'Parts / line items sold today (Cairo day)' })
+  @AdminOnly()
+  soldToday(
+    @CurrentUser() user: AuthUser,
+    @Query('branchId') branchId?: string,
+  ) {
+    const scope = effectiveBranchScope(user, branchId);
+    return this.ordersService.soldToday(scope);
+  }
+
+  @Post('admin/sales/walk-in')
+  @ApiTags('Admin — Sales')
+  @ApiOperation({ summary: 'Record an in-store (walk-in) cash sale' })
+  @ApiBody({ type: WalkInSaleDto })
+  @AdminOnly()
+  walkInSale(
+    @CurrentUser() user: AuthUser,
+    @Body() dto: WalkInSaleDto,
+    @Query('branchId') branchId?: string,
+  ) {
+    const scope = effectiveBranchScope(user, branchId);
+    return this.ordersService.createWalkInSale(user.userId, dto, scope);
   }
 
   @Patch('admin/orders/:id/status')

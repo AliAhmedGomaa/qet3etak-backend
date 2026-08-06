@@ -25,6 +25,16 @@ export class CheckoutItemDto {
   quantity!: number;
 }
 
+export class WalkInItemDto extends CheckoutItemDto {
+  /** Optional override of catalog unit price (EGP). */
+  @ApiPropertyOptional({ example: 45 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  unitPrice?: number;
+}
+
 export class CheckoutDto {
   @ApiProperty({ type: [CheckoutItemDto] })
   @IsArray()
@@ -38,6 +48,31 @@ export class CheckoutDto {
   paymentMethod!: PaymentMethod;
 
   @ApiPropertyOptional({ example: 'Deliver before noon' })
+  @IsOptional()
+  @IsString()
+  notes?: string;
+}
+
+/** Admin counter / walk-in sale at the physical shop. */
+export class WalkInSaleDto {
+  @ApiProperty({ type: [WalkInItemDto] })
+  @IsArray()
+  @ArrayMinSize(1)
+  @ValidateNested({ each: true })
+  @Type(() => WalkInItemDto)
+  items!: WalkInItemDto[];
+
+  @ApiPropertyOptional({ example: 'أحمد' })
+  @IsOptional()
+  @IsString()
+  customerName?: string;
+
+  @ApiPropertyOptional({ example: '01001234567' })
+  @IsOptional()
+  @IsString()
+  customerPhone?: string;
+
+  @ApiPropertyOptional({ example: 'بيع نقدي من المحل' })
   @IsOptional()
   @IsString()
   notes?: string;

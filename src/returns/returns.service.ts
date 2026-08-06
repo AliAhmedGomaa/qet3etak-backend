@@ -24,6 +24,7 @@ import { WalletsService } from '../wallets/wallets.service';
 import {
   ApproveReturnDto,
   CreateReturnRequestDto,
+  MarkOrderReturnedDto,
   RejectReturnDto,
 } from './dto/return.dto';
 import {
@@ -41,6 +42,129 @@ export class ReturnsService {
     private readonly walletsService: WalletsService,
     private readonly pushService: PushService,
   ) {}
+
+  /**
+   * Admin marks a wholesale order as returned:
+   * restocks remaining items, refunds CREDIT debt, sets order status RETURNED.
+   */
+  async markOrderReturnedByAdmin(
+    orderId: string,
+    adminId: string,
+    dto: MarkOrderReturnedDto = {},
+  ): Promise<{ order: Record<string, unknown>; returnRequest: Record<string, unknown> | null }> {
+    const order = await this.ordersService.getById(orderId);
+    if (order.status === OrderStatus.RETURNED) {
+      throw new BadRequestException('Order is already returned');
+    }
+    if (
+      order.status !== OrderStatus.RECEIVED &&
+      order.status !== OrderStatus.SHIPPED &&
+      order.status !== OrderStatus.DELIVERED
+    ) {
+      throw new BadRequestException(
+        'Only received, shipped, or delivered orders can be returned',
+      );
+    }
+
+    // Drop pending shop return requests so we don't double-restock later.
+    await this.returnModel
+      .updateMany(
+        {
+          orderId: order._id,
+          status: ReturnRequestStatus.PENDING,
+        },
+        {
+          $set: {
+            status: ReturnRequestStatus.REJECTED,
+            adminNote: 'أُلغي لأن الإدارة أرجعت الطلب كاملاً',
+            refundMethod: ReturnRefundMethod.NONE,
+            reviewedAt: new Date(),
+            reviewedBy: new Types.ObjectId(adminId),
+          },
+        },
+      )
+      .exec();
+
+    const alreadyReturned = await this.returnedQuantitiesForOrder(
+      String(order._id),
+    );
+    const byProductQty = new Map<string, number>();
+    for (const line of order.items ?? []) {
+      const key = String(line.productId);
+      byProductQty.set(key, (byProductQty.get(key) ?? 0) + (line.quantity || 0));
+    }
+    const returnItems: Array<{ productId: string; quantity: number }> = [];
+    for (const [productId, orderedQty] of byProductQty) {
+      const used = alreadyReturned.get(productId) ?? 0;
+      const remaining = orderedQty - used;
+      if (remaining > 0) {
+        returnItems.push({ productId, quantity: remaining });
+      }
+    }
+
+    let returnView: Record<string, unknown> | null = null;
+    if (returnItems.length > 0) {
+      const resolvedItems = this.resolveReturnItems(
+        order.items,
+        returnItems,
+        alreadyReturned,
+      );
+      const refundAmount = Number(
+        resolvedItems
+          .reduce((sum, line) => sum + line.lineTotal, 0)
+          .toFixed(2),
+      );
+
+      for (const line of resolvedItems) {
+        await this.productsService.incrementStock(
+          String(line.productId),
+          line.quantity,
+        );
+      }
+
+      let refundMethod = ReturnRefundMethod.NONE;
+      if (order.paymentMethod === PaymentMethod.CREDIT && refundAmount > 0) {
+        await this.walletsService.applyReturnCredit(
+          String(order.shopId),
+          refundAmount,
+          order._id as Types.ObjectId,
+          adminId,
+          `Admin return ${order.orderNumber}`,
+        );
+        refundMethod = ReturnRefundMethod.WALLET_CREDIT;
+      }
+
+      const reason =
+        dto.reason?.trim() || 'إرجاع كامل بواسطة الإدارة';
+      const created = await this.returnModel.create({
+        shopId: order.shopId,
+        shopName: order.shopName,
+        branchId: order.branchId,
+        orderId: order._id,
+        orderNumber: order.orderNumber,
+        paymentMethod: order.paymentMethod,
+        items: resolvedItems,
+        refundAmount,
+        reason,
+        status: ReturnRequestStatus.APPROVED,
+        adminNote: dto.adminNote?.trim() || 'تم الإرجاع من لوحة الإدارة',
+        refundMethod,
+        reviewedAt: new Date(),
+        reviewedBy: new Types.ObjectId(adminId),
+      });
+      returnView = this.toView(created);
+    }
+
+    const updated = await this.ordersService.setReturnedStatus(
+      String(order._id),
+      dto.reason?.trim() || dto.adminNote?.trim(),
+    );
+
+    return {
+      order: updated.toJSON() as unknown as Record<string, unknown>,
+      returnRequest: returnView,
+    };
+  }
 
   async create(
     shopUserId: string,

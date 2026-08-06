@@ -43,6 +43,7 @@ export const PERMISSION_CATALOG: PermissionDef[] = [
   { key: 'inventory.manage', labelAr: 'إدارة المخزون', group: 'catalog', groupLabelAr: 'الكتالوج' },
 
   { key: 'orders.read', labelAr: 'عرض الطلبات', group: 'orders', groupLabelAr: 'الطلبات' },
+  { key: 'orders.create', labelAr: 'بيع مباشر من المحل', group: 'orders', groupLabelAr: 'الطلبات' },
   { key: 'orders.update', labelAr: 'تحديث الطلبات / التوصيل', group: 'orders', groupLabelAr: 'الطلبات' },
 
   { key: 'invoices.read', labelAr: 'عرض الفواتير', group: 'invoices', groupLabelAr: 'الفواتير' },
@@ -92,6 +93,7 @@ export const OPS_PERMISSIONS: string[] = [
   'qualities.manage',
   'inventory.manage',
   'orders.read',
+  'orders.create',
   'orders.update',
   'invoices.read',
   'invoices.manage',
@@ -120,6 +122,7 @@ export const BRANCH_MANAGER_PERMISSIONS: string[] = [
   'shops.read',
   'shops.update',
   'orders.read',
+  'orders.create',
   'orders.update',
   'invoices.read',
   'credit.read',

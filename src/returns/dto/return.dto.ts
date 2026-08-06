@@ -63,3 +63,22 @@ export class ApproveReturnDto {
   @IsString()
   adminNote?: string;
 }
+
+/** Admin marks a wholesale order as fully returned (restock + refund). */
+export class MarkOrderReturnedDto {
+  @ApiPropertyOptional({
+    example: 'العميل رفض الاستلام / مرتجع من المحل',
+    minLength: 3,
+  })
+  @IsOptional()
+  @IsString()
+  @MinLength(3)
+  reason?: string;
+
+  @ApiPropertyOptional({
+    example: 'تم استلام المرتجع في المخزن',
+  })
+  @IsOptional()
+  @IsString()
+  adminNote?: string;
+}

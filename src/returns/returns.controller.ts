@@ -33,6 +33,7 @@ import { effectiveBranchScope } from '../common/branch-scope';
 import {
   ApproveReturnDto,
   CreateReturnRequestDto,
+  MarkOrderReturnedDto,
   RejectReturnDto,
 } from './dto/return.dto';
 import { ReturnsService } from './returns.service';
@@ -170,5 +171,27 @@ export class ReturnsController {
     @Body() dto: RejectReturnDto,
   ) {
     return this.returnsService.reject(id, user.userId, dto);
+  }
+
+  @Patch('admin/orders/:id/return')
+  @ApiTags('Admin — Orders')
+  @ApiOperation({
+    summary: 'Mark an order as returned',
+    description:
+      'Restocks remaining returnable quantities, refunds CREDIT wallet debt, sets order status to RETURNED, and records an approved return request.',
+  })
+  @ApiBody({ type: MarkOrderReturnedDto, required: false })
+  @ApiOkResponse({ description: 'Updated order + return request' })
+  @AdminOnly()
+  markOrderReturned(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: MarkOrderReturnedDto,
+  ) {
+    return this.returnsService.markOrderReturnedByAdmin(
+      id,
+      user.userId,
+      dto ?? {},
+    );
   }
 }

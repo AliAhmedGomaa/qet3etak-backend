@@ -5,6 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
+import * as bcrypt from 'bcrypt';
 import { Model, Types } from 'mongoose';
 import {
   ADMIN_PANEL_ROLES,
@@ -100,6 +101,28 @@ export class UsersService {
     const user = await this.findById(id);
     if (!user) throw new NotFoundException('User not found');
     return user;
+  }
+
+  /**
+   * System counter party used as shopId for walk-in (in-store) sales.
+   * Idempotent — creates once with a reserved phone number.
+   */
+  async ensureWalkInCounterShop(): Promise<UserDocument> {
+    const phone = '00000000000';
+    const existing = await this.findByPhone(phone);
+    if (existing) return existing;
+    const passwordHash = await bcrypt.hash(`walk-in-${Date.now()}`, 10);
+    return this.create({
+      fullName: 'بيع مباشر',
+      shopName: 'بيع مباشر — المحل',
+      phone,
+      city: '—',
+      address: 'نقطة البيع بالمحل',
+      commercialRegPhotoUrl: '/uploads/walk-in-placeholder.png',
+      passwordHash,
+      role: UserRole.SHOP_OWNER,
+      status: UserStatus.APPROVED,
+    });
   }
 
   async findShopByIdOrFail(

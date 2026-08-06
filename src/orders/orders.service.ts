@@ -7,7 +7,7 @@ import {
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
-import { OrderStatus, PaymentMethod } from '../common/enums/order.enums';
+import { OrderStatus, OrderSource, PaymentMethod } from '../common/enums/order.enums';
 import {
   normalizePagination,
   paginatedResult,
@@ -33,6 +33,7 @@ import {
   CheckoutDto,
   ReorderDto,
   UpdateOrderStatusDto,
+  WalkInSaleDto,
 } from './dto/order.dto';
 import { Order, OrderDocument } from './schemas/order.schema';
 
@@ -64,6 +65,7 @@ const STATUS_FLOW: OrderStatus[] = [
   OrderStatus.RECEIVED,
   OrderStatus.SHIPPED,
   OrderStatus.DELIVERED,
+  OrderStatus.RETURNED,
 ];
 
 function escapeRegex(value: string): string {
@@ -93,6 +95,36 @@ function monthBounds(month: string): { start: Date; end: Date } {
   const start = new Date(Date.UTC(y, m - 1, 1, 0, 0, 0, 0));
   const end = new Date(Date.UTC(y, m, 1, 0, 0, 0, 0));
   return { start, end };
+}
+
+/** Calendar day bounds in Africa/Cairo (UTC+2/+3). */
+function cairoTodayBounds(now = new Date()): {
+  start: Date;
+  end: Date;
+  date: string;
+} {
+  const date = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Africa/Cairo',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(now);
+  // Midday UTC probe to resolve Cairo offset for this calendar day.
+  const probe = new Date(`${date}T12:00:00Z`);
+  const cairoHour = Number(
+    new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'Africa/Cairo',
+      hour: '2-digit',
+      hour12: false,
+    }).format(probe),
+  );
+  const offsetHours = cairoHour - 12;
+  const start = new Date(`${date}T00:00:00.000Z`);
+  start.setUTCHours(start.getUTCHours() - offsetHours);
+  const end = new Date(start);
+  end.setUTCDate(end.getUTCDate() + 1);
+  end.setUTCMilliseconds(-1);
+  return { start, end, date };
 }
 
 function feeModelSummary(
@@ -183,6 +215,7 @@ export class OrdersService implements OnModuleInit {
       shopLocationLat: shop.locationLat,
       shopLocationLng: shop.locationLng,
       branchId: shop.branchId,
+      source: OrderSource.WHOLESALE,
       status: OrderStatus.RECEIVED,
       paymentMethod: dto.paymentMethod,
       items: priced.lines,
@@ -407,7 +440,14 @@ export class OrdersService implements OnModuleInit {
     branchScope?: string | null,
   ): Promise<PaginatedResult<OrderDocument>> {
     const p = normalizePagination(page, limit, 20);
-    const filter = withBranchFilter(buildOrderSearchFilter(q), branchScope ?? null);
+    const filter = withBranchFilter(
+      {
+        ...buildOrderSearchFilter(q),
+        // Keep the delivery board free of counter sales.
+        source: { $ne: OrderSource.WALK_IN },
+      },
+      branchScope ?? null,
+    );
     const [items, total] = await Promise.all([
       this.orderModel
         .find(filter)
@@ -418,6 +458,152 @@ export class OrdersService implements OnModuleInit {
       this.orderModel.countDocuments(filter).exec(),
     ]);
     return paginatedResult(items, total, p.page, p.limit);
+  }
+
+  /**
+   * Create an in-store (walk-in) sale: stock ↓, order DELIVERED, invoice issued.
+   */
+  async createWalkInSale(
+    adminUserId: string,
+    dto: WalkInSaleDto,
+    branchId?: string | null,
+  ): Promise<OrderDocument> {
+    const counter = await this.usersService.ensureWalkInCounterShop();
+    const priced = await this.priceWalkInItems(dto.items);
+
+    for (const line of priced.lines) {
+      const product = await this.productsService.findDocumentById(
+        String(line.productId),
+      );
+      if (product.stockQuantity < line.quantity) {
+        throw new BadRequestException(
+          `Insufficient stock for ${product.title}`,
+        );
+      }
+      product.stockQuantity -= line.quantity;
+      await product.save();
+    }
+
+    const now = new Date();
+    const orderNumber = await this.nextOrderNumber();
+    const order = await this.orderModel.create({
+      orderNumber,
+      shopId: counter._id,
+      shopName: counter.shopName,
+      shopCity: counter.city || '',
+      shopAddress: counter.address || '',
+      source: OrderSource.WALK_IN,
+      customerName: dto.customerName?.trim() || '',
+      customerPhone: dto.customerPhone?.trim() || '',
+      createdByUserId: new Types.ObjectId(adminUserId),
+      ...(branchId && Types.ObjectId.isValid(branchId)
+        ? { branchId: new Types.ObjectId(branchId) }
+        : {}),
+      status: OrderStatus.DELIVERED,
+      paymentMethod: PaymentMethod.CASH,
+      items: priced.lines,
+      subtotal: priced.total,
+      total: priced.total,
+      notes: dto.notes?.trim() || 'بيع مباشر من المحل',
+      deliveredAt: now,
+      statusHistory: [
+        {
+          status: OrderStatus.DELIVERED,
+          at: now,
+          note: 'بيع نقدي من المحل',
+        },
+      ],
+    });
+
+    await this.invoicesService.issueFromOrder(order);
+    return order;
+  }
+
+  /** Line items sold today (Cairo calendar day), both wholesale and walk-in. */
+  async soldToday(
+    branchScope?: string | null,
+  ): Promise<{
+    date: string;
+    totalQuantity: number;
+    totalRevenue: number;
+    orderCount: number;
+    lines: Array<{
+      orderId: string;
+      orderNumber: string;
+      source: string;
+      shopName: string;
+      customerName: string;
+      productId: string;
+      title: string;
+      sku: string;
+      quantity: number;
+      unitPrice: number;
+      lineTotal: number;
+      paymentMethod: string;
+      createdAt: Date;
+    }>;
+  }> {
+    const { start, end, date } = cairoTodayBounds();
+    const filter = withBranchFilter(
+      { createdAt: { $gte: start, $lte: end } },
+      branchScope ?? null,
+    );
+    const orders = await this.orderModel
+      .find(filter)
+      .sort({ createdAt: -1 })
+      .exec();
+
+    const lines: Array<{
+      orderId: string;
+      orderNumber: string;
+      source: string;
+      shopName: string;
+      customerName: string;
+      productId: string;
+      title: string;
+      sku: string;
+      quantity: number;
+      unitPrice: number;
+      lineTotal: number;
+      paymentMethod: string;
+      createdAt: Date;
+    }> = [];
+
+    let totalQuantity = 0;
+    let totalRevenue = 0;
+    for (const order of orders) {
+      const createdAt =
+        (order as OrderDocument & { createdAt?: Date }).createdAt ?? new Date();
+      for (const item of order.items ?? []) {
+        const qty = Number(item.quantity) || 0;
+        const lineTotal = Number(item.lineTotal) || 0;
+        totalQuantity += qty;
+        totalRevenue += lineTotal;
+        lines.push({
+          orderId: String(order._id),
+          orderNumber: order.orderNumber,
+          source: order.source || OrderSource.WHOLESALE,
+          shopName: order.shopName,
+          customerName: order.customerName || '',
+          productId: String(item.productId),
+          title: item.title,
+          sku: item.sku || '',
+          quantity: qty,
+          unitPrice: Number(item.unitPrice) || 0,
+          lineTotal,
+          paymentMethod: order.paymentMethod,
+          createdAt,
+        });
+      }
+    }
+
+    return {
+      date,
+      totalQuantity,
+      totalRevenue: Number(totalRevenue.toFixed(2)),
+      orderCount: orders.length,
+      lines,
+    };
   }
 
   async updateStatus(
@@ -431,6 +617,17 @@ export class OrdersService implements OnModuleInit {
     if (!order) throw new NotFoundException('Order not found');
 
     this.sanitizeLegacyStatus(order);
+
+    if (dto.status === OrderStatus.RETURNED) {
+      throw new BadRequestException(
+        'Use PATCH /admin/orders/:id/return to mark an order as returned (restocks inventory)',
+      );
+    }
+    if (order.status === OrderStatus.RETURNED) {
+      throw new BadRequestException(
+        'Returned orders cannot change status',
+      );
+    }
 
     const currentIdx = STATUS_FLOW.indexOf(order.status);
     const nextIdx = STATUS_FLOW.indexOf(dto.status);
@@ -474,6 +671,7 @@ export class OrdersService implements OnModuleInit {
         [OrderStatus.RECEIVED]: 'تم استلام الطلب',
         [OrderStatus.SHIPPED]: 'تم الشحن',
         [OrderStatus.DELIVERED]: 'تم التسليم',
+        [OrderStatus.RETURNED]: 'تم إرجاع الطلب',
       };
       try {
         await this.pushService.notifyUser(String(order.shopId), {
@@ -511,6 +709,36 @@ export class OrdersService implements OnModuleInit {
       }
     }
 
+    return order;
+  }
+
+  /** Mark order RETURNED after inventory/refund handling (called by ReturnsService). */
+  async setReturnedStatus(
+    orderId: string,
+    note?: string,
+  ): Promise<OrderDocument> {
+    const order = await this.getById(orderId);
+    this.sanitizeLegacyStatus(order);
+    if (order.status === OrderStatus.RETURNED) {
+      return order;
+    }
+    order.status = OrderStatus.RETURNED;
+    order.statusHistory.push({
+      status: OrderStatus.RETURNED,
+      at: new Date(),
+      note: note?.trim() || 'تم إرجاع الطلب بواسطة الإدارة',
+    });
+    await order.save();
+    try {
+      await this.pushService.notifyUser(String(order.shopId), {
+        title: `إرجاع الطلب ${order.orderNumber}`,
+        body: 'تم إرجاع الطلب وإعادة الكميات للمخزون',
+        url: `/orders/${String(order._id)}`,
+        tag: `order-returned-${String(order._id)}`,
+      });
+    } catch {
+      /* push is best-effort */
+    }
     return order;
   }
 
@@ -858,6 +1086,53 @@ export class OrdersService implements OnModuleInit {
         quantity: item.quantity,
         unitPrice: pricing.unitPrice,
         lineTotal: pricing.lineTotal,
+      });
+    }
+    const total = Number(
+      lines.reduce((sum, l) => sum + l.lineTotal, 0).toFixed(2),
+    );
+    return { lines, total };
+  }
+
+  private async priceWalkInItems(items: WalkInSaleDto['items']) {
+    const lines = [];
+    for (const item of items) {
+      if (!Types.ObjectId.isValid(item.productId)) {
+        throw new BadRequestException(`Invalid product id ${item.productId}`);
+      }
+      const product = await this.productsService.findDocumentById(
+        item.productId,
+      );
+      if (!product.isActive) {
+        throw new BadRequestException(`${product.title} is not available`);
+      }
+      if (item.quantity > product.stockQuantity) {
+        throw new BadRequestException(
+          `Insufficient stock for ${product.title} (available: ${product.stockQuantity})`,
+        );
+      }
+      const override =
+        item.unitPrice != null && Number.isFinite(Number(item.unitPrice))
+          ? Number(item.unitPrice)
+          : null;
+      const unitPrice =
+        override != null
+          ? override
+          : resolveUnitPrice(
+              item.quantity,
+              product.basePrice,
+              product.tieredPricing ?? [],
+              0,
+            ).unitPrice;
+      const lineTotal = Number((unitPrice * item.quantity).toFixed(2));
+      lines.push({
+        productId: product._id,
+        title: product.title,
+        sku: product.sku || '',
+        qualityGrade: product.qualityGrade,
+        quantity: item.quantity,
+        unitPrice,
+        lineTotal,
       });
     }
     const total = Number(

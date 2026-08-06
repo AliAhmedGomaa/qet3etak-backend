@@ -1,6 +1,6 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument, Types } from 'mongoose';
-import { OrderStatus, PaymentMethod } from '../../common/enums/order.enums';
+import { OrderStatus, OrderSource, PaymentMethod } from '../../common/enums/order.enums';
 
 export type OrderDocument = HydratedDocument<Order>;
 
@@ -64,6 +64,29 @@ export class Order {
 
   @Prop({ required: true })
   shopName!: string;
+
+  /**
+   * Sales channel. Legacy orders without this field are treated as WHOLESALE.
+   */
+  @Prop({
+    type: String,
+    enum: OrderSource,
+    default: OrderSource.WHOLESALE,
+    index: true,
+  })
+  source!: OrderSource;
+
+  /** Optional walk-in customer name (counter sales). */
+  @Prop({ trim: true, default: '' })
+  customerName!: string;
+
+  /** Optional walk-in customer phone. */
+  @Prop({ trim: true, default: '' })
+  customerPhone!: string;
+
+  /** Admin/staff who created a walk-in sale. */
+  @Prop({ type: Types.ObjectId, ref: 'User' })
+  createdByUserId?: Types.ObjectId;
 
   /** Snapshot of shop address at checkout for courier navigation. */
   @Prop({ trim: true, default: '' })
