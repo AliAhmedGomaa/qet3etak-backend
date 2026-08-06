@@ -62,6 +62,21 @@ export class WalkInSaleDto {
   @Type(() => WalkInItemDto)
   items!: WalkInItemDto[];
 
+  /** When set, sale is billed to this approved shop (in-store pickup). */
+  @ApiPropertyOptional({ example: '6a5ed4b2f718e30c208e48d0' })
+  @IsOptional()
+  @IsString()
+  shopId?: string;
+
+  /** Cash (default) or shop credit — credit only allowed with shopId. */
+  @ApiPropertyOptional({
+    enum: [PaymentMethod.CASH, PaymentMethod.CREDIT],
+    example: PaymentMethod.CASH,
+  })
+  @IsOptional()
+  @IsEnum(PaymentMethod)
+  paymentMethod?: PaymentMethod;
+
   @ApiPropertyOptional({ example: 'أحمد' })
   @IsOptional()
   @IsString()

@@ -8,6 +8,7 @@ import {
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { OrderStatus, OrderSource, PaymentMethod } from '../common/enums/order.enums';
+import { UserStatus } from '../common/enums/user.enums';
 import {
   normalizePagination,
   paginatedResult,
@@ -461,15 +462,52 @@ export class OrdersService implements OnModuleInit {
   }
 
   /**
-   * Create an in-store (walk-in) sale: stock ↓, order DELIVERED, invoice issued.
+   * Create an in-store sale: stock ↓, order DELIVERED, invoice issued.
+   * Without shopId → anonymous walk-in (cash).
+   * With shopId → sale for an approved registered shop (cash or credit).
    */
   async createWalkInSale(
     adminUserId: string,
     dto: WalkInSaleDto,
     branchId?: string | null,
   ): Promise<OrderDocument> {
-    const counter = await this.usersService.ensureWalkInCounterShop();
-    const priced = await this.priceWalkInItems(dto.items);
+    const shopId = dto.shopId?.trim();
+    let shop;
+    let source: OrderSource;
+    let shopDiscountPercent = 0;
+
+    if (shopId) {
+      shop = await this.usersService.findShopByIdOrFail(shopId);
+      if (shop.status !== UserStatus.APPROVED) {
+        throw new BadRequestException('Shop must be approved');
+      }
+      if (shop.phone === '00000000000') {
+        throw new BadRequestException('Invalid shop for counter sale');
+      }
+      source = OrderSource.WHOLESALE;
+      shopDiscountPercent = Number(shop.shopDiscountPercent ?? 0);
+    } else {
+      shop = await this.usersService.ensureWalkInCounterShop();
+      source = OrderSource.WALK_IN;
+    }
+
+    const paymentMethod =
+      shopId && dto.paymentMethod === PaymentMethod.CREDIT
+        ? PaymentMethod.CREDIT
+        : PaymentMethod.CASH;
+
+    if (!shopId && dto.paymentMethod === PaymentMethod.CREDIT) {
+      throw new BadRequestException(
+        'Credit payment requires selecting a registered shop',
+      );
+    }
+
+    const priced = await this.priceWalkInItems(dto.items, shopDiscountPercent);
+
+    if (paymentMethod === PaymentMethod.CREDIT) {
+      const wallet = await this.walletsService.ensureForShop(String(shop._id));
+      this.walletsService.assertCreditAvailable(wallet, priced.total);
+    }
 
     for (const line of priced.lines) {
       const product = await this.productsService.findDocumentById(
@@ -486,34 +524,53 @@ export class OrdersService implements OnModuleInit {
 
     const now = new Date();
     const orderNumber = await this.nextOrderNumber();
+    const note =
+      dto.notes?.trim() ||
+      (shopId ? 'بيع من المحل لمتجر مسجّل' : 'بيع مباشر من المحل');
     const order = await this.orderModel.create({
       orderNumber,
-      shopId: counter._id,
-      shopName: counter.shopName,
-      shopCity: counter.city || '',
-      shopAddress: counter.address || '',
-      source: OrderSource.WALK_IN,
-      customerName: dto.customerName?.trim() || '',
-      customerPhone: dto.customerPhone?.trim() || '',
+      shopId: shop._id,
+      shopName: shop.shopName,
+      shopCity: shop.city || '',
+      shopAddress: shop.address || '',
+      shopLocationLat: shop.locationLat,
+      shopLocationLng: shop.locationLng,
+      source,
+      customerName: shopId ? '' : dto.customerName?.trim() || '',
+      customerPhone: shopId ? '' : dto.customerPhone?.trim() || '',
       createdByUserId: new Types.ObjectId(adminUserId),
       ...(branchId && Types.ObjectId.isValid(branchId)
         ? { branchId: new Types.ObjectId(branchId) }
-        : {}),
+        : shop.branchId
+          ? { branchId: shop.branchId }
+          : {}),
       status: OrderStatus.DELIVERED,
-      paymentMethod: PaymentMethod.CASH,
+      paymentMethod,
       items: priced.lines,
       subtotal: priced.total,
       total: priced.total,
-      notes: dto.notes?.trim() || 'بيع مباشر من المحل',
+      notes: note,
       deliveredAt: now,
       statusHistory: [
         {
           status: OrderStatus.DELIVERED,
           at: now,
-          note: 'بيع نقدي من المحل',
+          note:
+            paymentMethod === PaymentMethod.CREDIT
+              ? 'بيع آجل من المحل'
+              : 'بيع نقدي من المحل',
         },
       ],
     });
+
+    if (paymentMethod === PaymentMethod.CREDIT) {
+      await this.walletsService.chargeCredit(
+        String(shop._id),
+        priced.total,
+        order._id as Types.ObjectId,
+        `Pay later · ${orderNumber}`,
+      );
+    }
 
     await this.invoicesService.issueFromOrder(order);
     return order;
@@ -1094,7 +1151,10 @@ export class OrdersService implements OnModuleInit {
     return { lines, total };
   }
 
-  private async priceWalkInItems(items: WalkInSaleDto['items']) {
+  private async priceWalkInItems(
+    items: WalkInSaleDto['items'],
+    shopDiscountPercent = 0,
+  ) {
     const lines = [];
     for (const item of items) {
       if (!Types.ObjectId.isValid(item.productId)) {
@@ -1122,7 +1182,7 @@ export class OrdersService implements OnModuleInit {
               item.quantity,
               product.basePrice,
               product.tieredPricing ?? [],
-              0,
+              shopDiscountPercent,
             ).unitPrice;
       const lineTotal = Number((unitPrice * item.quantity).toFixed(2));
       lines.push({

@@ -145,7 +145,7 @@ export class OrdersController {
 
   @Post('admin/sales/walk-in')
   @ApiTags('Admin — Sales')
-  @ApiOperation({ summary: 'Record an in-store (walk-in) cash sale' })
+  @ApiOperation({ summary: 'Record an in-store sale (walk-in or registered shop)' })
   @ApiBody({ type: WalkInSaleDto })
   @AdminOnly()
   walkInSale(
