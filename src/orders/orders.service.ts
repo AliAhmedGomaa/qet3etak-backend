@@ -133,11 +133,18 @@ export class OrdersService implements OnModuleInit {
   ) {}
 
   async onModuleInit(): Promise<void> {
-    // PREPARING removed — fold legacy rows into RECEIVED.
+    // PREPARING removed — fold legacy rows into RECEIVED (status + history).
     await this.orderModel
       .updateMany(
         { status: 'PREPARING' } as Record<string, unknown>,
         { $set: { status: OrderStatus.RECEIVED } },
+      )
+      .exec();
+    await this.orderModel
+      .updateMany(
+        { 'statusHistory.status': 'PREPARING' } as Record<string, unknown>,
+        { $set: { 'statusHistory.$[ev].status': OrderStatus.RECEIVED } },
+        { arrayFilters: [{ 'ev.status': 'PREPARING' }] },
       )
       .exec();
   }
@@ -413,8 +420,13 @@ export class OrdersService implements OnModuleInit {
     orderId: string,
     dto: UpdateOrderStatusDto,
   ): Promise<OrderDocument> {
+    if (!Types.ObjectId.isValid(orderId)) {
+      throw new BadRequestException('Invalid order id');
+    }
     const order = await this.orderModel.findById(orderId).exec();
     if (!order) throw new NotFoundException('Order not found');
+
+    this.sanitizeLegacyStatus(order);
 
     const currentIdx = STATUS_FLOW.indexOf(order.status);
     const nextIdx = STATUS_FLOW.indexOf(dto.status);
@@ -439,9 +451,19 @@ export class OrdersService implements OnModuleInit {
       await this.applyDeliveryAssignment(order, dto.deliveryGuyId, dto.note);
     }
 
-    if (!statusChanged && !dto.deliveryGuyId) return order;
+    if (!statusChanged && !dto.deliveryGuyId) {
+      // Still persist if we sanitized legacy PREPARING rows.
+      if (order.isModified()) await order.save();
+      return order;
+    }
 
-    await order.save();
+    try {
+      await order.save();
+    } catch (err) {
+      const msg =
+        err instanceof Error ? err.message : 'Failed to update order status';
+      throw new BadRequestException(msg);
+    }
 
     if (statusChanged) {
       const statusLabel: Record<OrderStatus, string> = {
@@ -449,19 +471,23 @@ export class OrdersService implements OnModuleInit {
         [OrderStatus.SHIPPED]: 'تم الشحن',
         [OrderStatus.DELIVERED]: 'تم التسليم',
       };
-      await this.pushService.notifyUser(String(order.shopId), {
-        title: `تحديث الطلب ${order.orderNumber}`,
-        body: statusLabel[dto.status],
-        url: `/orders/${order.id}`,
-        tag: `order-${order.id}`,
-      });
-      if (dto.status === OrderStatus.DELIVERED) {
-        await this.pushService.notifyAdmins({
-          title: `تم تسليم ${order.orderNumber}`,
-          body: `${order.shopName}${order.deliveryGuyName ? ` — ${order.deliveryGuyName}` : ''}`,
-          url: '/orders-board',
-          tag: `order-delivered-${order.id}`,
+      try {
+        await this.pushService.notifyUser(String(order.shopId), {
+          title: `تحديث الطلب ${order.orderNumber}`,
+          body: statusLabel[dto.status],
+          url: `/orders/${String(order._id)}`,
+          tag: `order-${String(order._id)}`,
         });
+        if (dto.status === OrderStatus.DELIVERED) {
+          await this.pushService.notifyAdmins({
+            title: `تم تسليم ${order.orderNumber}`,
+            body: `${order.shopName}${order.deliveryGuyName ? ` — ${order.deliveryGuyName}` : ''}`,
+            url: '/orders-board',
+            tag: `order-delivered-${String(order._id)}`,
+          });
+        }
+      } catch {
+        // Push failures must not roll back a successful status change.
       }
     }
 
@@ -471,13 +497,33 @@ export class OrdersService implements OnModuleInit {
       dto.status === OrderStatus.DELIVERED &&
       order.deliveryGuyId
     ) {
-      await this.deliveryGuysService.recordDeliveryStats(
-        String(order.deliveryGuyId),
-        order.deliveryFee,
-      );
+      try {
+        await this.deliveryGuysService.recordDeliveryStats(
+          String(order.deliveryGuyId),
+          order.deliveryFee,
+        );
+      } catch {
+        // Stats are best-effort; status already saved.
+      }
     }
 
     return order;
+  }
+
+  /** Map removed PREPARING status so saves pass current schema validation. */
+  private sanitizeLegacyStatus(order: OrderDocument): void {
+    if ((order.status as string) === 'PREPARING') {
+      order.status = OrderStatus.RECEIVED;
+    }
+    if (!Array.isArray(order.statusHistory)) return;
+    let changed = false;
+    for (const ev of order.statusHistory) {
+      if ((ev.status as string) === 'PREPARING') {
+        ev.status = OrderStatus.RECEIVED;
+        changed = true;
+      }
+    }
+    if (changed) order.markModified('statusHistory');
   }
 
   async listForDeliveryGuy(
@@ -557,6 +603,7 @@ export class OrdersService implements OnModuleInit {
     if (order.status === OrderStatus.DELIVERED) {
       throw new BadRequestException('Order already delivered');
     }
+    this.sanitizeLegacyStatus(order);
     order.deliveryPhotoUrl = `/uploads/${photoFilename.trim()}`;
     order.deliveredAt = new Date();
     await order.save();
@@ -707,6 +754,7 @@ export class OrdersService implements OnModuleInit {
   ): Promise<OrderDocument> {
     const order = await this.orderModel.findById(orderId).exec();
     if (!order) throw new NotFoundException('Order not found');
+    this.sanitizeLegacyStatus(order);
     await this.applyDeliveryAssignment(order, dto.deliveryGuyId, dto.note);
     await order.save();
     return order;

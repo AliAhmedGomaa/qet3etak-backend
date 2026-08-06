@@ -33,8 +33,12 @@ export const OrderItemSchema = SchemaFactory.createForClass(OrderItem);
 
 @Schema({ _id: false })
 export class OrderStatusEvent {
-  @Prop({ type: String, enum: OrderStatus, required: true })
-  status!: OrderStatus;
+  /**
+   * Stored as string so legacy history rows (e.g. PREPARING) do not
+   * break document saves after the status enum was narrowed.
+   */
+  @Prop({ type: String, required: true })
+  status!: string;
 
   @Prop({ default: () => new Date() })
   at!: Date;
