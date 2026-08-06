@@ -40,6 +40,13 @@ export class DeliveryGuysService {
       throw new ConflictException('A delivery guy with this phone already exists');
     }
     const passwordHash = await bcrypt.hash(dto.password, 10);
+    const feeModel = dto.feeModel ?? DeliveryFeeModel.FLAT;
+    const hourlyRate = dto.hourlyRate ?? 0;
+    if (feeModel === DeliveryFeeModel.HOURLY && hourlyRate <= 0) {
+      throw new BadRequestException(
+        'يجب تحديد سعر الساعة (أكبر من صفر) عند اختيار الأجر بالساعة',
+      );
+    }
     return this.guyModel.create({
       fullName: dto.fullName.trim(),
       phone,
@@ -48,12 +55,12 @@ export class DeliveryGuysService {
       vehicleType: dto.vehicleType?.trim() || '',
       notes: dto.notes?.trim() || '',
       status: dto.status ?? DeliveryGuyStatus.ACTIVE,
-      feeModel: dto.feeModel ?? DeliveryFeeModel.FLAT,
+      feeModel,
       flatFee: dto.flatFee ?? 30,
       percentRate: dto.percentRate ?? 0,
       baseFee: dto.baseFee ?? 20,
       perItemFee: dto.perItemFee ?? 2,
-      hourlyRate: dto.hourlyRate ?? 0,
+      hourlyRate,
       totalDeliveries: 0,
       totalFeesEarned: 0,
     });
@@ -127,7 +134,7 @@ export class DeliveryGuysService {
       (guy.hourlyRate ?? 0) <= 0
     ) {
       throw new BadRequestException(
-        'hourlyRate must be > 0 when feeModel is HOURLY',
+        'يجب تحديد سعر الساعة (أكبر من صفر) عند اختيار الأجر بالساعة',
       );
     }
     await guy.save();
