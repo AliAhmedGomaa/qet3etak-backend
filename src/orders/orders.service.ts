@@ -927,6 +927,26 @@ export class OrdersService implements OnModuleInit {
     });
   }
 
+  /** Replace proof photo on an already-delivered order (e.g. legacy /uploads lost on Vercel). */
+  async updateDeliveryPhotoByCourier(
+    deliveryGuyId: string,
+    orderId: string,
+    photo?: Express.Multer.File,
+  ): Promise<OrderDocument> {
+    if (!photo?.filename && !photo?.buffer?.length && !photo?.path) {
+      throw new BadRequestException('صورة إثبات التسليم مطلوبة');
+    }
+    const order = await this.getForDeliveryGuy(deliveryGuyId, orderId);
+    if (order.status !== OrderStatus.DELIVERED) {
+      throw new BadRequestException(
+        'يمكن تحديث صورة التسليم للطلبات المسلّمة فقط',
+      );
+    }
+    order.deliveryPhotoUrl = await this.persistDeliveryProofPhoto(photo!);
+    await order.save();
+    return order;
+  }
+
   /**
    * Store delivery proof in Mongo as a data URL so it survives Vercel
    * ephemeral /tmp (disk uploads disappear across cold starts).

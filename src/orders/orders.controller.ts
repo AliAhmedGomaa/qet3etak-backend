@@ -276,6 +276,42 @@ export class OrdersController {
     );
   }
 
+  @Patch('delivery/orders/:id/delivery-photo')
+  @ApiTags('Delivery — Orders')
+  @ApiOperation({
+    summary:
+      'Replace proof-of-delivery photo on an already delivered order',
+  })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: ['photo'],
+      properties: {
+        photo: {
+          type: 'string',
+          format: 'binary',
+          description: 'Proof-of-delivery photo (jpeg/png/webp, max 3MB)',
+        },
+      },
+    },
+  })
+  @UseInterceptors(
+    FileInterceptor('photo', imageUploadOptions('delivery-proof')),
+  )
+  @DeliveryOnly()
+  updateDeliveryPhoto(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    return this.ordersService.updateDeliveryPhotoByCourier(
+      user.userId,
+      id,
+      file,
+    );
+  }
+
   @Get('delivery/earnings')
   @ApiTags('Delivery — Earnings')
   @ApiOperation({
