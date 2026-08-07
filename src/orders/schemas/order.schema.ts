@@ -132,7 +132,7 @@ export class Order {
   @Prop({ min: 0, default: 0 })
   deliveryFee!: number;
 
-  /** Proof-of-delivery photo path (e.g. /uploads/delivery-proof-….jpg). */
+  /** Proof-of-delivery photo (data URL preferred; legacy `/uploads/...` paths supported). */
   @Prop({ trim: true, default: '' })
   deliveryPhotoUrl!: string;
 

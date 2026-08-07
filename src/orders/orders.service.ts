@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
+import { join } from 'path';
 import { OrderStatus, OrderSource, PaymentMethod } from '../common/enums/order.enums';
 import { UserStatus } from '../common/enums/user.enums';
 import {
@@ -16,6 +17,7 @@ import {
 } from '../common/pagination';
 import { withBranchFilter } from '../common/branch-scope';
 import { absoluteMediaUrl } from '../common/media-url';
+import { getUploadsDir } from '../common/uploads';
 import { ProductsService } from '../products/products.service';
 import { resolveUnitPrice } from '../products/pricing.util';
 import { UsersService } from '../users/users.service';
@@ -838,6 +840,7 @@ export class OrdersService implements OnModuleInit {
     const [items, total] = await Promise.all([
       this.orderModel
         .find(filter)
+        .select('-deliveryPhotoUrl')
         .sort({ updatedAt: -1, createdAt: -1 })
         .skip(p.skip)
         .limit(p.limit)
@@ -903,9 +906,9 @@ export class OrdersService implements OnModuleInit {
     deliveryGuyId: string,
     orderId: string,
     note?: string,
-    photoFilename?: string,
+    photo?: Express.Multer.File,
   ): Promise<OrderDocument> {
-    if (!photoFilename?.trim()) {
+    if (!photo?.filename && !photo?.buffer?.length && !photo?.path) {
       throw new BadRequestException(
         'صورة إثبات التسليم مطلوبة',
       );
@@ -915,13 +918,46 @@ export class OrdersService implements OnModuleInit {
       throw new BadRequestException('Order already delivered');
     }
     this.sanitizeLegacyStatus(order);
-    order.deliveryPhotoUrl = `/uploads/${photoFilename.trim()}`;
+    order.deliveryPhotoUrl = await this.persistDeliveryProofPhoto(photo!);
     order.deliveredAt = new Date();
     await order.save();
     return this.updateStatus(orderId, {
       status: OrderStatus.DELIVERED,
       note: note?.trim() || 'تم التسليم بواسطة المندوب',
     });
+  }
+
+  /**
+   * Store delivery proof in Mongo as a data URL so it survives Vercel
+   * ephemeral /tmp (disk uploads disappear across cold starts).
+   */
+  private async persistDeliveryProofPhoto(
+    photo: Express.Multer.File,
+  ): Promise<string> {
+    const { readFile, unlink } = await import('fs/promises');
+    let bytes: Buffer;
+    if (photo.buffer?.length) {
+      bytes = photo.buffer;
+    } else {
+      const diskPath =
+        photo.path ||
+        join(getUploadsDir(), photo.filename);
+      bytes = await readFile(diskPath);
+      try {
+        await unlink(diskPath);
+      } catch {
+        /* temp file may already be gone */
+      }
+    }
+    const mime =
+      photo.mimetype && /^image\//i.test(photo.mimetype)
+        ? photo.mimetype
+        : 'image/jpeg';
+    // Guard MongoDB 16MB doc limit (~12MB base64 budget for the photo alone).
+    if (bytes.length > 4.5 * 1024 * 1024) {
+      throw new BadRequestException('صورة التسليم كبيرة جداً');
+    }
+    return `data:${mime};base64,${bytes.toString('base64')}`;
   }
 
   async earningsForDeliveryGuy(
@@ -994,7 +1030,7 @@ export class OrdersService implements OnModuleInit {
         .sort({ updatedAt: -1 })
         .limit(50)
         .select(
-          'orderNumber shopName total deliveryFee deliveryPhotoUrl deliveredAt updatedAt status',
+          'orderNumber shopName total deliveryFee deliveredAt updatedAt status',
         )
         .exec(),
     ]);
@@ -1048,11 +1084,6 @@ export class OrdersService implements OnModuleInit {
           shopName: json.shopName,
           total: json.total,
           deliveryFee: json.deliveryFee,
-          deliveryPhotoUrl: absoluteMediaUrl(
-            typeof json.deliveryPhotoUrl === 'string'
-              ? json.deliveryPhotoUrl
-              : '',
-          ),
           deliveredAt: json.deliveredAt ?? json.updatedAt,
         };
       }),

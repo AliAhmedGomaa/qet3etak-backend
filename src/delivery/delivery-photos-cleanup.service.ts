@@ -39,17 +39,20 @@ export class DeliveryPhotosCleanupService {
       const url = (order.deliveryPhotoUrl || '').trim();
       if (!url) continue;
 
-      const filename = url.split('/').pop();
-      if (filename && filename.startsWith('delivery-proof-')) {
-        const fullPath = join(uploadsDir, filename);
-        try {
-          if (existsSync(fullPath)) {
-            unlinkSync(fullPath);
+      // Disk proofs (legacy). Data-URL proofs live only in Mongo.
+      if (!url.startsWith('data:')) {
+        const filename = url.split('/').pop();
+        if (filename && filename.startsWith('delivery-proof-')) {
+          const fullPath = join(uploadsDir, filename);
+          try {
+            if (existsSync(fullPath)) {
+              unlinkSync(fullPath);
+            }
+          } catch (err) {
+            this.logger.warn(
+              `Failed to delete ${fullPath}: ${(err as Error).message}`,
+            );
           }
-        } catch (err) {
-          this.logger.warn(
-            `Failed to delete ${fullPath}: ${(err as Error).message}`,
-          );
         }
       }
 

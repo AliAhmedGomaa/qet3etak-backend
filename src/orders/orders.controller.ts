@@ -272,7 +272,7 @@ export class OrdersController {
       user.userId,
       id,
       body?.note,
-      file?.filename,
+      file,
     );
   }
 
